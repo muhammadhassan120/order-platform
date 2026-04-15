@@ -3,7 +3,7 @@ pipeline {
 
   environment {
     AWS_REGION       = 'us-east-2'
-    ECR_REPO         = credentials('992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo')
+    ECR_REPO = credentials('ecr-repo-url')
     ECS_CLUSTER      = 'order-platform-cluster'
     ECS_SERVICE      = 'order-platform-service'
     LAMBDA_FUNC      = 'order-platform-order-processor'
