@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+.env
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+*.zip
+*.log
+.DS_Store

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Platform</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AWS Event-Driven Order Platform</p>
+        <h1>Order Management UI</h1>
+        <p class="subtext">
+          Simple browser UI for inventory, order creation, health check, and order status lookup.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button id="checkHealthBtn">Check Health</button>
+        <div id="healthBadge" class="badge neutral">Not checked</div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Inventory</h2>
+        <p class="muted">Fetch products from the backend database.</p>
+        <button id="loadInventoryBtn">Load Inventory</button>
+        <div class="table-wrap">
+          <table id="inventoryTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Price</th>
+                <th>Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="4">No data yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Create Order</h2>
+        <p class="muted">Create a new order using one product and quantity.</p>
+
+        <form id="createOrderForm">
+          <label>
+            Customer Email
+            <input type="email" id="customerEmail" placeholder="customer@example.com" required />
+          </label>
+
+          <label>
+            Product ID
+            <input type="text" id="productId" placeholder="PROD-001" required />
+          </label>
+
+          <label>
+            Quantity
+            <input type="number" id="qty" min="1" value="1" required />
+          </label>
+
+          <button type="submit">Create Order</button>
+        </form>
+
+        <pre id="createOrderResult" class="result">No order created yet</pre>
+      </section>
+
+      <section class="card">
+        <h2>Get Order Status</h2>
+        <p class="muted">Check order status by order ID.</p>
+
+        <form id="getOrderForm">
+          <label>
+            Order ID
+            <input type="number" id="orderId" min="1" placeholder="1" required />
+          </label>
+
+          <button type="submit">Get Order</button>
+        </form>
+
+        <pre id="getOrderResult" class="result">No order fetched yet</pre>
+      </section>
+
+      <section class="card">
+        <h2>API Info</h2>
+        <div class="kv">
+          <div><strong>Health:</strong> <code>GET /health</code></div>
+          <div><strong>Inventory:</strong> <code>GET /inventory</code></div>
+          <div><strong>Create Order:</strong> <code>POST /orders</code></div>
+          <div><strong>Get Order:</strong> <code>GET /orders/:id</code></div>
+        </div>
+        <p class="muted">
+          If you deploy this on ECS behind ALB or CloudFront, open the root URL in Chrome and this UI will appear.
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

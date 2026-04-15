@@ -1,0 +1,68 @@
+pipeline {
+  agent any
+
+  parameters {
+    choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action')
+    choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Terraform environment')
+  }
+
+  environment {
+    AWS_REGION = 'us-east-2'
+    TF_STATE_BUCKET = 'event-driven-state-key'
+  }
+
+  stages {
+    stage('Terraform Init') {
+      steps {
+        dir('infra') {
+          sh '''
+            terraform init \
+              -backend-config="bucket=${TF_STATE_BUCKET}" \
+              -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
+              -backend-config="region=${AWS_REGION}"
+          '''
+        }
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        dir('infra') {
+          sh "terraform plan -var-file=environments/${params.ENVIRONMENT}.tfvars -out=tfplan"
+        }
+      }
+    }
+
+    stage('Manual Approval') {
+      when {
+        expression { params.ACTION == 'apply' || params.ACTION == 'destroy' }
+      }
+      steps {
+        input message: "Review the plan above. Proceed with '${params.ACTION}' for ${params.ENVIRONMENT}?",
+              ok: "Yes, ${params.ACTION}"
+      }
+    }
+
+    stage('Terraform Apply') {
+      when {
+        expression { params.ACTION == 'apply' }
+      }
+      steps {
+        dir('infra') {
+          sh 'terraform apply tfplan'
+        }
+      }
+    }
+
+    stage('Terraform Destroy') {
+      when {
+        expression { params.ACTION == 'destroy' }
+      }
+      steps {
+        dir('infra') {
+          sh "terraform destroy -var-file=environments/${params.ENVIRONMENT}.tfvars -auto-approve"
+        }
+      }
+    }
+  }
+}

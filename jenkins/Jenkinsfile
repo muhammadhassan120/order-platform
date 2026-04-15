@@ -1,0 +1,110 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION       = 'us-east-2'
+    ECR_REPO         = credentials('992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo')
+    ECS_CLUSTER      = 'order-platform-cluster'
+    ECS_SERVICE      = 'order-platform-service'
+    LAMBDA_FUNC      = 'order-platform-order-processor'
+    ARTIFACTS_S3     = 'order-processsing-artifact'
+    TASK_CONTAINER   = 'order-api'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          env.GIT_COMMIT_SHORT = sh(
+            returnStdout: true,
+            script: 'git rev-parse --short HEAD'
+          ).trim()
+
+          env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
+        }
+      }
+    }
+
+    stage('Test: Order API') {
+      steps {
+        dir('services/order-api') {
+          sh 'npm ci'
+          sh 'npm test'
+        }
+      }
+    }
+
+    stage('Build & Push: Order API') {
+      steps {
+        dir('services/order-api') {
+          sh '''
+            aws ecr get-login-password --region ${AWS_REGION} | \
+              docker login --username AWS --password-stdin ${ECR_REPO}
+
+            docker build \
+              -t ${ECR_REPO}:${IMAGE_TAG} \
+              -t ${ECR_REPO}:latest \
+              -f Dockerfile .
+
+            docker push ${ECR_REPO}:${IMAGE_TAG}
+            docker push ${ECR_REPO}:latest
+          '''
+        }
+      }
+    }
+
+    stage('Deploy: ECS') {
+      steps {
+        sh '''
+          chmod +x jenkins/scripts/deploy.sh
+          AWS_REGION=${AWS_REGION} \
+          ECR_REPO=${ECR_REPO} \
+          IMAGE_TAG=${IMAGE_TAG} \
+          ECS_CLUSTER=${ECS_CLUSTER} \
+          ECS_SERVICE=${ECS_SERVICE} \
+          TASK_CONTAINER=${TASK_CONTAINER} \
+          ./jenkins/scripts/deploy.sh
+        '''
+      }
+    }
+
+    stage('Smoke Test') {
+      steps {
+        sh '''
+          chmod +x jenkins/scripts/smoke-test.sh
+          AWS_REGION=${AWS_REGION} \
+          ECS_CLUSTER=${ECS_CLUSTER} \
+          ECS_SERVICE=${ECS_SERVICE} \
+          ./jenkins/scripts/smoke-test.sh
+        '''
+      }
+    }
+
+    stage('Archive') {
+      when {
+        expression { env.ARTIFACTS_S3 != 'PUT_YOUR_ARTIFACTS_BUCKET_NAME_HERE' }
+      }
+      steps {
+        sh '''
+          aws s3 cp services/order-api \
+            s3://${ARTIFACTS_S3}/builds/${IMAGE_TAG}/order-api/ \
+            --recursive \
+            --exclude "node_modules/*"
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Pipeline #${BUILD_NUMBER} PASSED - image: ${IMAGE_TAG}"
+    }
+    failure {
+      echo "Pipeline #${BUILD_NUMBER} FAILED"
+    }
+    always {
+      cleanWs()
+    }
+  }
+}
