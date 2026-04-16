@@ -37,15 +37,14 @@ module "ecs" {
     {
       name  = "AUTH_ENABLED"
       value = "false"
+    },
+    {
+      name  = "DB_SECRET_ARN"
+      value = module.rds.db_secret_arn
     }
   ]
 
-  secrets = [
-    {
-      name      = "DB_SECRET_ARN"
-      valueFrom = module.rds.db_secret_arn
-    }
-  ]
+  secrets = []
 
   depends_on = [module.alb, module.rds, module.async]
 }

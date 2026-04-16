@@ -2,13 +2,12 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION       = 'us-east-2'
-    ECR_REPO = credentials('ecr-repo-url')
-    ECS_CLUSTER      = 'order-platform-cluster'
-    ECS_SERVICE      = 'order-platform-service'
-    LAMBDA_FUNC      = 'order-platform-order-processor'
-    ARTIFACTS_S3     = 'order-processsing-artifact'
-    TASK_CONTAINER   = 'order-api'
+    AWS_REGION     = 'us-east-2'
+    ECR_REPO       = credentials('ecr-repo-url')
+    ECS_CLUSTER    = 'order-platform-cluster'
+    ECS_SERVICE    = 'order-platform-service'
+    TASK_CONTAINER = 'order-api'
+    ARTIFACTS_S3   = 'order-processsing-artifact'
   }
 
   stages {
@@ -20,7 +19,6 @@ pipeline {
             returnStdout: true,
             script: 'git rev-parse --short HEAD'
           ).trim()
-
           env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
         }
       }
@@ -39,6 +37,7 @@ pipeline {
       steps {
         dir('services/order-api') {
           sh '''
+            set -e
             aws ecr get-login-password --region ${AWS_REGION} | \
               docker login --username AWS --password-stdin ${ECR_REPO}
 
@@ -83,7 +82,7 @@ pipeline {
 
     stage('Archive') {
       when {
-        expression { env.ARTIFACTS_S3 != 'PUT_YOUR_ARTIFACTS_BUCKET_NAME_HERE' }
+        expression { env.ARTIFACTS_S3?.trim() }
       }
       steps {
         sh '''

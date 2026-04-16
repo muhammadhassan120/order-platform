@@ -25,10 +25,22 @@ xargs -I {} aws elbv2 describe-load-balancers \
 echo "Testing against ALB: http://${ALB_DNS}"
 
 echo "Test 1: Health check"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/health")
+SUCCESS="false"
 
-if [ "${HTTP_CODE}" != "200" ]; then
-  echo "FAIL: Health check returned HTTP ${HTTP_CODE}"
+for i in $(seq 1 24); do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/health" || true)
+  echo "Attempt ${i}: HTTP ${HTTP_CODE}"
+
+  if [ "${HTTP_CODE}" = "200" ]; then
+    SUCCESS="true"
+    break
+  fi
+
+  sleep 10
+done
+
+if [ "${SUCCESS}" != "true" ]; then
+  echo "FAIL: Health check never became 200"
   exit 1
 fi
 
