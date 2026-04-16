@@ -27,46 +27,54 @@ resource "aws_instance" "jenkins" {
 set -e
 
 # Update system
-yum update -y
+dnf update -y
 
-# Install Java 21 (NOT 17)
-yum install -y java-21-amazon-corretto
+# Install Java 21
+dnf install -y java-21-amazon-corretto
 
-# Set Java 21 as default
+# Set Java 21 default
 alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java
-
-# Verify Java
-java -version
 
 # Install Jenkins repo
 wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
 rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
 
 # Install Jenkins
-yum install -y jenkins
+dnf install -y jenkins
 
-# Install Git + Docker
-yum install -y git docker
+# Install Git, Docker, AWS CLI, jq
+dnf install -y git docker awscli jq
 
-# Start Docker
-systemctl start docker
+# Install Node.js 20 + npm
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+dnf install -y nodejs
+
+# Start and enable Docker
 systemctl enable docker
+systemctl start docker
 
-# Give Jenkins Docker access
+# Give Jenkins access to Docker
 usermod -aG docker jenkins
 
-# Start Jenkins
+# Start and enable Jenkins
 systemctl daemon-reexec
 systemctl daemon-reload
 systemctl enable jenkins
 systemctl start jenkins
 
-# Wait for Jenkins
+# Wait a bit
 sleep 20
 
-# Print initial password
-cat /var/lib/jenkins/secrets/initialAdminPassword
+# Show versions for debugging
+java -version
+node -v
+npm -v
+aws --version
+jq --version
+docker --version
 
+# Print Jenkins initial password
+cat /var/lib/jenkins/secrets/initialAdminPassword || true
 EOF
 
   tags = {

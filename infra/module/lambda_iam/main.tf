@@ -30,13 +30,14 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_execution" {
 }
 
 resource "aws_iam_policy" "lambda_custom" {
-  name        = "${var.name_prefix}-lambda-custom-policy"
+  name_prefix = "${var.name_prefix}-lambda-custom-policy-"
   description = "Custom permissions for order processor Lambda"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "SecretsManagerAccess"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
@@ -45,6 +46,7 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = var.db_secret_arn
       },
       {
+        Sid    = "DynamoDBAccess"
         Effect = "Allow"
         Action = [
           "dynamodb:PutItem",
@@ -54,6 +56,7 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = var.audit_table_arn
       },
       {
+        Sid    = "S3InvoiceAccess"
         Effect = "Allow"
         Action = [
           "s3:PutObject",
@@ -62,6 +65,7 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = "${var.invoice_bucket_arn}/*"
       },
       {
+        Sid    = "SNSPublishAccess"
         Effect = "Allow"
         Action = [
           "sns:Publish"
@@ -69,6 +73,7 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = var.sns_topic_arn
       },
       {
+        Sid    = "SQSAccess"
         Effect = "Allow"
         Action = [
           "sqs:ReceiveMessage",
@@ -80,6 +85,10 @@ resource "aws_iam_policy" "lambda_custom" {
       }
     ]
   })
+
+  tags = {
+    Name = "${var.name_prefix}-lambda-custom-policy"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_custom_attach" {

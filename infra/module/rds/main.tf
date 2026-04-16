@@ -10,14 +10,13 @@ resource "aws_db_subnet_group" "default" {
 
 # ==================== RANDOM PASSWORD ====================
 resource "random_password" "db_password" {
-  length           = 20
-  special          = true
-  override_special = "!@#$%&*()-_=+[]{}<>"
+  length  = 20
+  special = false
 }
 
 # ==================== SECRETS MANAGER ====================
 resource "aws_secretsmanager_secret" "db_password" {
-  name        = "${var.name_prefix}-db-credentials-v3"
+  name        = "${var.name_prefix}-db-credentials-v5"
   description = "Holds the PostgreSQL database credentials"
 }
 

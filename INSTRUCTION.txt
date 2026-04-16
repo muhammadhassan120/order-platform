@@ -1,0 +1,9 @@
+1- replace admin cidr block which is in /infra/security .
+should be like this :
+admin_cidr  = "182.189.99.160/32"
+
+replace with your actual ip adress
+
+
+2- 
+
