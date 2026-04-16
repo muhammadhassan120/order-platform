@@ -81,16 +81,8 @@ pipeline {
     }
 
     stage('Archive') {
-      when {
-        expression { env.ARTIFACTS_S3?.trim() }
-      }
       steps {
-        sh '''
-          aws s3 cp services/order-api \
-            s3://${ARTIFACTS_S3}/builds/${IMAGE_TAG}/order-api/ \
-            --recursive \
-            --exclude "node_modules/*"
-        '''
+        echo 'Skipping archive upload for now'
       }
     }
   }
