@@ -22,33 +22,51 @@ resource "aws_instance" "jenkins" {
     volume_type = "gp3"
   }
 
-  user_data = <<-EOF
+ user_data = <<-EOF
 #!/bin/bash
-yum update -y
-yum install -y docker git wget unzip
+set -e
 
+# Update system
+yum update -y
+
+# Install Java 21 (NOT 17)
+yum install -y java-21-amazon-corretto
+
+# Set Java 21 as default
+alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java
+
+# Verify Java
+java -version
+
+# Install Jenkins repo
 wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
 rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
-yum install -y java-17-amazon-corretto jenkins
+
+# Install Jenkins
+yum install -y jenkins
+
+# Install Git + Docker
+yum install -y git docker
+
+# Start Docker
+systemctl start docker
+systemctl enable docker
+
+# Give Jenkins Docker access
+usermod -aG docker jenkins
+
+# Start Jenkins
+systemctl daemon-reexec
+systemctl daemon-reload
 systemctl enable jenkins
 systemctl start jenkins
 
-systemctl enable docker
-systemctl start docker
-usermod -aG docker jenkins
+# Wait for Jenkins
+sleep 20
 
-yum install -y yum-utils
-yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-yum install -y terraform
+# Print initial password
+cat /var/lib/jenkins/secrets/initialAdminPassword
 
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-./aws/install
-
-curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-yum install -y nodejs
-
-echo "Jenkins setup complete" > /home/ec2-user/setup-complete.txt
 EOF
 
   tags = {

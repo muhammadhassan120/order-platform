@@ -25,10 +25,27 @@ module "ecs" {
     {
       name  = "PORT"
       value = "3000"
+    },
+    {
+      name  = "AWS_REGION"
+      value = "us-east-2"
+    },
+    {
+      name  = "ORDER_QUEUE_URL"
+      value = module.async.order_queue_url
+    },
+    {
+      name  = "AUTH_ENABLED"
+      value = "false"
     }
   ]
 
-  secrets = []
+  secrets = [
+    {
+      name      = "DB_SECRET_ARN"
+      valueFrom = module.rds.db_secret_arn
+    }
+  ]
 
-  depends_on = [module.alb]
+  depends_on = [module.alb, module.rds, module.async]
 }
