@@ -52,23 +52,46 @@ resource "aws_dynamodb_table" "audit_trail" {
   }
 }
 
-# ==================== LAMBDA PACKAGE ====================
+# ==================== BUILD LAMBDA PACKAGE WITH DEPENDENCIES ====================
+
+resource "null_resource" "lambda_build" {
+  triggers = {
+    requirements = filemd5("${path.root}/../services/order-processor/requirements.txt")
+    handler      = filemd5("${path.root}/../services/order-processor/handler.py")
+    invoice_gen  = filemd5("${path.root}/../services/order-processor/invoice_generator.py")
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["PowerShell", "-Command"]
+    command     = <<EOT
+$buildDir = "${path.module}/lambda_build"
+$sourceDir = "${path.root}/../services/order-processor"
+
+if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
+New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+Copy-Item -Path "$sourceDir/*" -Destination $buildDir -Recurse -Force
+python -m pip install -r "$sourceDir/requirements.txt" -t $buildDir
+EOT
+  }
+}
 
 data "archive_file" "lambda_package" {
   type        = "zip"
-  source_dir  = abspath("${path.root}/../services/order-processor")
+  source_dir  = "${path.module}/lambda_build"
   output_path = "${path.module}/lambda_function.zip"
+
+  depends_on = [null_resource.lambda_build]
 }
 
 # ==================== LAMBDA FUNCTION ====================
 
 resource "aws_lambda_function" "order_processor" {
-  function_name    = "${var.name_prefix}-order-processor"
-  runtime          = "python3.12"
-  handler          = "handler.handler"
-  role             = var.lambda_role_arn
-  timeout          = 60
-  memory_size      = 256
+  function_name = "${var.name_prefix}-order-processor"
+  runtime       = "python3.12"
+  handler       = "handler.handler"
+  role          = var.lambda_role_arn
+  timeout       = 60
+  memory_size   = 256
 
   filename         = data.archive_file.lambda_package.output_path
   source_code_hash = data.archive_file.lambda_package.output_base64sha256

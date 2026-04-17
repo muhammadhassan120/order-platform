@@ -1,9 +1,256 @@
-1- replace admin cidr block which is in /infra/security .
-should be like this :
-admin_cidr  = "182.189.99.160/32"
+# Order Platform restart checklist
 
-replace with your actual ip adress
+When I come back and run `terraform apply`, I must do these steps in order so I do not get stuck again.
 
+## 1) Deploy infra
 
-2- 
+From project root:
 
+```bash
+cd infra
+terraform init
+terraform plan
+terraform apply
+```
+
+After apply finishes, note these things from Terraform outputs / AWS console:
+
+* Jenkins public IP
+* CloudFront URL
+* RDS endpoint
+* DB secret in Secrets Manager
+* ECR repo URL
+
+The project architecture is:
+
+UI → CloudFront → ALB → ECS Order API → RDS
+Order API → SQS → Lambda → DynamoDB / S3 / SNS. 
+
+## 2) Open Jenkins
+
+Open in browser:
+
+```text
+http://<JENKINS_PUBLIC_IP>:8080
+```
+
+Get initial password on Jenkins EC2 if needed:
+
+```bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+```
+
+Install suggested plugins plus anything needed for pipeline, Docker, AWS, Git.
+
+## 3) Jenkins setup reminders
+
+In Jenkins:
+
+* create pipeline job
+* connect GitHub repo
+* add ECR repo credential with ID:
+  `ecr-repo-url`
+* use `jenkins/Jenkinsfile`
+
+If Archive stage causes S3 access denied again, keep Archive skipped in Jenkinsfile for now.
+
+## 4) Important: seed RDS before relying on the app
+
+The database must be seeded after RDS is up, otherwise order creation/inventory breaks. The runbook explicitly says to run the seed SQL after RDS is ready. 
+
+### Very important lesson from last time
+
+Do **not** depend on `/var/lib/jenkins/workspace/order-platform-app` for seeding, because Jenkins cleans the workspace. We solved it by directly cloning the whole GitHub repo on the EC2 machine.
+
+## 5) SSH into Jenkins EC2
+
+```bash
+ssh ec2-user@<JENKINS_PUBLIC_IP>
+```
+
+Install PostgreSQL client if needed:
+
+```bash
+sudo dnf install -y postgresql15 git
+```
+
+Clone repo manually:
+
+```bash
+cd ~
+rm -rf order-platform
+git clone https://github.com/muhammadhassan120/order-platform.git
+cd order-platform
+```
+
+## 6) Get DB credentials
+
+Go to AWS Secrets Manager and open the DB secret.
+
+Use the real values from the secret JSON, especially:
+
+* username = `appuser`
+* password = real password from secret
+* host = RDS endpoint
+* dbname = `mydb`
+
+Last time the mistake was using `<USER>` literally. The correct username was `appuser`.
+
+## 7) Seed the database
+
+Run:
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require" -f scripts/seed-db.sql
+```
+
+Example pattern only:
+
+```bash
+psql "host=terraform-xxxxxxxx.us-east-2.rds.amazonaws.com port=5432 dbname=mydb user=appuser password=YOUR_REAL_PASSWORD sslmode=require" -f scripts/seed-db.sql
+```
+
+## 8) Verify seed worked
+
+Connect to DB:
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require"
+```
+
+Then inside psql:
+
+```sql
+\dt
+```
+
+Expected important tables:
+
+```text
+orders
+products
+```
+
+Then exit:
+
+```sql
+\q
+```
+
+## 9) Run Jenkins pipeline
+
+Now go back to Jenkins and run the app pipeline.
+
+Expected stages:
+
+* checkout
+* test
+* docker build/push
+* ECS deploy
+* smoke test
+* archive (may be skipped). 
+
+## 10) Manual app check
+
+Open CloudFront URL in browser.
+
+Use the UI to check:
+
+* Health = 200
+* Inventory loads
+* Create order works
+* Get order works. 
+
+## 11) Async processing check
+
+If orders stay `PENDING`, check:
+
+* SQS queue
+* DLQ
+* Lambda test
+* Lambda logs
+
+Last time we found:
+
+* main queue empty
+* DLQ had messages
+* Lambda had dependency issue (`pg8000`) and earlier KMS/decrypt problems
+
+If needed, rerun:
+
+```bash
+cd infra
+terraform init
+terraform plan
+terraform apply
+```
+
+after fixing Lambda packaging/config.
+
+## 12) End of day: destroy everything to avoid cost
+
+From project root:
+
+```bash
+cd infra
+terraform destroy
+```
+
+If asked for confirmation, type:
+
+```text
+yes
+```
+
+## Quick restart summary
+
+1. `terraform apply`
+2. note Jenkins IP / RDS endpoint / secret / CloudFront URL
+3. open Jenkins
+4. configure Jenkins + ECR credential
+5. SSH into Jenkins EC2
+6. clone repo manually
+7. run `psql ... -f scripts/seed-db.sql`
+8. verify tables
+9. run Jenkins pipeline
+10. test UI
+11. when done, `terraform destroy`
+
+## Commands only block
+
+```bash
+cd infra
+terraform init
+terraform plan
+terraform apply
+```
+
+```bash
+ssh ec2-user@<JENKINS_PUBLIC_IP>
+```
+
+```bash
+sudo dnf install -y postgresql15 git
+cd ~
+rm -rf order-platform
+git clone https://github.com/muhammadhassan120/order-platform.git
+cd order-platform
+```
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require" -f scripts/seed-db.sql
+```
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require"
+```
+
+```sql
+\dt
+\q
+```
+
+```bash
+cd infra
+terraform destroy
+```

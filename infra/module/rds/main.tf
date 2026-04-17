@@ -16,7 +16,7 @@ resource "random_password" "db_password" {
 
 # ==================== SECRETS MANAGER ====================
 resource "aws_secretsmanager_secret" "db_password" {
-  name        = "${var.name_prefix}-db-credentials-v5"
+  name        = "${var.name_prefix}-db-credentials-v6-lastest"
   description = "Holds the PostgreSQL database credentials"
 }
 
