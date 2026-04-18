@@ -24,7 +24,7 @@ resource "aws_instance" "jenkins" {
     volume_type = "gp3"
   }
 
-user_data = <<-USERDATA
+  user_data = <<-USERDATA
 #!/bin/bash
 set -euxo pipefail
 
@@ -52,7 +52,6 @@ dnf install -y \
 
 dnf install -y java-21-amazon-corretto
 alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java || true
-java -version
 
 java -version
 node -v
@@ -71,19 +70,7 @@ dnf clean all
 dnf makecache
 dnf install -y jenkins
 
-systemctl daemon-reload
-systemctl enable jenkins
-systemctl start jenkins
-
-for i in {1..90}; do
-  if curl -fsS http://127.0.0.1:8080/login >/dev/null; then
-    echo "Jenkins is up"
-    break
-  fi
-  echo "Waiting for Jenkins to start..."
-  sleep 5
-done
-
+# Prepare Jenkins BEFORE first start
 mkdir -p /var/lib/jenkins/init.groovy.d
 
 cat > /var/lib/jenkins/init.groovy.d/basic.groovy <<'GROOVY'
@@ -108,29 +95,48 @@ instance.save()
 GROOVY
 
 chown -R jenkins:jenkins /var/lib/jenkins/init.groovy.d
-systemctl restart jenkins
+
+# Disable setup wizard BEFORE first Jenkins start
+if [ -f /usr/lib/systemd/system/jenkins.service ]; then
+  mkdir -p /etc/systemd/system/jenkins.service.d
+  cat > /etc/systemd/system/jenkins.service.d/override.conf <<'EOF'
+[Service]
+Environment="JAVA_OPTS=-Djenkins.install.runSetupWizard=false"
+EOF
+fi
+
+systemctl daemon-reload
+systemctl enable jenkins
+systemctl start jenkins
 
 for i in {1..90}; do
   if curl -fsS http://127.0.0.1:8080/login >/dev/null; then
-    echo "Jenkins restarted successfully"
+    echo "Jenkins is up"
     break
   fi
-  echo "Waiting for Jenkins after restart..."
+  echo "Waiting for Jenkins to start..."
   sleep 5
 done
 
+# Extra wait so auth/init settles completely
+sleep 20
+
+# Verify scripted admin works before CLI calls
+curl -fsS -u admin:Admin@12345 http://127.0.0.1:8080/me/api/json >/dev/null
+
 wget -O /tmp/jenkins-cli.jar http://127.0.0.1:8080/jnlpJars/jenkins-cli.jar
 
-java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -auth admin:Admin@12345 install-plugin \
+java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -webSocket -auth admin:Admin@12345 install-plugin \
   git workflow-aggregator docker-workflow aws-credentials credentials-binding ws-cleanup pipeline-stage-view
 
-java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -auth admin:Admin@12345 safe-restart
+java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -webSocket -auth admin:Admin@12345 safe-restart
 
 for i in {1..90}; do
-  if curl -fsS http://127.0.0.1:8080/login >/dev/null; then
+  if curl -fsS -u admin:Admin@12345 http://127.0.0.1:8080/me/api/json >/dev/null; then
     echo "Jenkins available after plugin restart"
     break
   fi
+  echo "Waiting for Jenkins after plugin restart..."
   sleep 5
 done
 
@@ -184,8 +190,8 @@ cat > /tmp/job.xml <<'JOBXML'
 </flow-definition>
 JOBXML
 
-java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -auth admin:Admin@12345 create-job order-platform < /tmp/job.xml || true
-java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -auth admin:Admin@12345 build order-platform || true
+java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -webSocket -auth admin:Admin@12345 create-job order-platform < /tmp/job.xml || true
+java -jar /tmp/jenkins-cli.jar -s http://127.0.0.1:8080 -webSocket -auth admin:Admin@12345 build order-platform || true
 
 echo "===== JENKINS SETUP COMPLETED ====="
 USERDATA
