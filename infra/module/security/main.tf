@@ -79,6 +79,13 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_ecs" {
   to_port                      = 5432
   ip_protocol                  = "tcp"
 }
+resource "aws_vpc_security_group_ingress_rule" "rds_from_jenkins" {
+  security_group_id            = aws_security_group.rds_sg.id
+  referenced_security_group_id = aws_security_group.jenkins_sg.id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+}
 
 resource "aws_vpc_security_group_ingress_rule" "rds_from_lambda" {
   security_group_id            = aws_security_group.rds_sg.id

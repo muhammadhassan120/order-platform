@@ -52,35 +52,16 @@ resource "aws_dynamodb_table" "audit_trail" {
   }
 }
 
-# ==================== BUILD LAMBDA PACKAGE WITH DEPENDENCIES ====================
-
-resource "null_resource" "lambda_build" {
-  triggers = {
-    requirements = filemd5("${path.root}/../services/order-processor/requirements.txt")
-    handler      = filemd5("${path.root}/../services/order-processor/handler.py")
-    invoice_gen  = filemd5("${path.root}/../services/order-processor/invoice_generator.py")
-  }
-
-  provisioner "local-exec" {
-    interpreter = ["PowerShell", "-Command"]
-    command     = <<EOT
-$buildDir = "${path.module}/lambda_build"
-$sourceDir = "${path.root}/../services/order-processor"
-
-if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
-New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
-Copy-Item -Path "$sourceDir/*" -Destination $buildDir -Recurse -Force
-python -m pip install -r "$sourceDir/requirements.txt" -t $buildDir
-EOT
-  }
-}
+# ==================== LAMBDA PACKAGE ====================
+# IMPORTANT:
+# We are NOT building Lambda with local-exec anymore.
+# We are zipping the already-prepared lambda_build folder that is stored in the repo.
+# This avoids Windows/Linux shell issues during terraform apply.
 
 data "archive_file" "lambda_package" {
   type        = "zip"
   source_dir  = "${path.module}/lambda_build"
   output_path = "${path.module}/lambda_function.zip"
-
-  depends_on = [null_resource.lambda_build]
 }
 
 # ==================== LAMBDA FUNCTION ====================

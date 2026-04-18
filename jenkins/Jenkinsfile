@@ -3,11 +3,10 @@ pipeline {
 
   environment {
     AWS_REGION     = 'us-east-2'
-    ECR_REPO       = credentials('ecr-repo-url')
+    ECR_REPO       = '992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo'
     ECS_CLUSTER    = 'order-platform-cluster'
     ECS_SERVICE    = 'order-platform-service'
     TASK_CONTAINER = 'order-api'
-    ARTIFACTS_S3   = 'order-processsing-artifact'
   }
 
   stages {

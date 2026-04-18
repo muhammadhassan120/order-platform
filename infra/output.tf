@@ -45,5 +45,5 @@ output "lambda_function_name" {
 
 output "jenkins_public_ip" {
   description = "Jenkins public IP"
-  value       = module.jenkins.jenkins_public_ip
+  value       = module.jenkins.public_ip
 }

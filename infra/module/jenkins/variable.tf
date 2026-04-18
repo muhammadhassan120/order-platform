@@ -23,3 +23,13 @@ variable "key_pair_name" {
   type        = string
   description = "Existing EC2 key pair name"
 }
+
+variable "db_secret_arn" {
+  type        = string
+  description = "Secrets Manager ARN for DB credentials"
+}
+
+variable "repo_url" {
+  type        = string
+  description = "Git repository URL"
+}

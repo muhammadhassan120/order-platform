@@ -72,3 +72,13 @@ scroll till the end and select "pipeline script from SCM" instead of piepline in
 "Paste github url" select branch main and select path "jenkins/Jenkinsfile"
 
 click build now
+
+
+visit cloudfont distribution, it will be showing ui ,
+
+before any test , go to sns and select order-platform-order-notification.
+
+click subscription --> select gmail protocol, and enter email,
+
+confirmation email will be sent
+
