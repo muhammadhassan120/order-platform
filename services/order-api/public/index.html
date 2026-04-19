@@ -2,205 +2,105 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Order Platform</title>
-
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      background: linear-gradient(135deg, #0f172a, #020617);
-      color: #e2e8f0;
-    }
-
-    h1 {
-      text-align: center;
-      padding: 20px;
-      color: #38bdf8;
-      text-shadow: 0 0 10px #38bdf8;
-    }
-
-    .container {
-      display: flex;
-      gap: 20px;
-      padding: 20px;
-    }
-
-    .card {
-      flex: 1;
-      background: rgba(15, 23, 42, 0.8);
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
-      transition: 0.3s;
-    }
-
-    .card:hover {
-      transform: scale(1.02);
-      box-shadow: 0 0 25px rgba(56, 189, 248, 0.5);
-    }
-
-    button {
-      background: #38bdf8;
-      border: none;
-      padding: 10px 15px;
-      border-radius: 8px;
-      color: black;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 10px;
-      transition: 0.2s;
-    }
-
-    button:hover {
-      background: #0ea5e9;
-    }
-
-    input {
-      width: 100%;
-      padding: 8px;
-      margin-top: 5px;
-      border-radius: 6px;
-      border: none;
-      background: #020617;
-      color: white;
-    }
-
-    table {
-      width: 100%;
-      margin-top: 10px;
-      border-collapse: collapse;
-    }
-
-    th, td {
-      padding: 8px;
-      border-bottom: 1px solid #334155;
-    }
-
-    th {
-      color: #38bdf8;
-    }
-
-    pre {
-      background: #020617;
-      padding: 10px;
-      border-radius: 8px;
-      overflow-x: auto;
-    }
-
-    .health {
-      text-align: center;
-      margin-top: 10px;
-    }
-
-    .health span {
-      background: #16a34a;
-      padding: 5px 10px;
-      border-radius: 6px;
-    }
-  </style>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
-
 <body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AWS Event-Driven Order Platform</p>
+        <h1>Order Management UI</h1>
+        <p class="subtext">
+          Simple browser UI for inventory, order creation, health check, and order status lookup.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button id="checkHealthBtn">Check Health</button>
+        <div id="healthBadge" class="badge neutral">Not checked</div>
+      </div>
+    </header>
 
-<h1>🚀 Order Management UI</h1>
+    <main class="grid">
+      <section class="card">
+        <h2>Inventory</h2>
+        <p class="muted">Fetch products from the backend database.</p>
+        <button id="loadInventoryBtn">Load Inventory</button>
+        <div class="table-wrap">
+          <table id="inventoryTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Price</th>
+                <th>Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="4">No data yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-<div class="health">
-  <button onclick="checkHealth()">Check Health</button>
-  <span id="healthStatus">Not checked</span>
-</div>
+      <section class="card">
+        <h2>Create Order</h2>
+        <p class="muted">Create a new order using one product and quantity.</p>
 
-<div class="container">
+        <form id="createOrderForm">
+          <label>
+            Customer Email
+            <input type="email" id="customerEmail" placeholder="customer@example.com" required />
+          </label>
 
-  <!-- INVENTORY -->
-  <div class="card">
-    <h2>Inventory</h2>
-    <button onclick="loadInventory()">Load Inventory</button>
-    <table id="inventoryTable"></table>
+          <label>
+            Product ID
+            <input type="text" id="productId" placeholder="PROD-001" required />
+          </label>
+
+          <label>
+            Quantity
+            <input type="number" id="qty" min="1" value="1" required />
+          </label>
+
+          <button type="submit">Create Order</button>
+        </form>
+
+        <pre id="createOrderResult" class="result">No order created yet</pre>
+      </section>
+
+      <section class="card">
+        <h2>Get Order Status</h2>
+        <p class="muted">Check order status by order ID.</p>
+
+        <form id="getOrderForm">
+          <label>
+            Order ID
+            <input type="number" id="orderId" min="1" placeholder="1" required />
+          </label>
+
+          <button type="submit">Get Order</button>
+        </form>
+
+        <pre id="getOrderResult" class="result">No order fetched yet</pre>
+      </section>
+
+      <section class="card">
+        <h2>API Info</h2>
+        <div class="kv">
+          <div><strong>Health:</strong> <code>GET /health</code></div>
+          <div><strong>Inventory:</strong> <code>GET /inventory</code></div>
+          <div><strong>Create Order:</strong> <code>POST /orders</code></div>
+          <div><strong>Get Order:</strong> <code>GET /orders/:id</code></div>
+        </div>
+        <p class="muted">
+          If you deploy this on ECS behind ALB or CloudFront, open the root URL in Chrome and this UI will appear.
+        </p>
+      </section>
+    </main>
   </div>
 
-  <!-- CREATE ORDER -->
-  <div class="card">
-    <h2>Create Order</h2>
-
-    <label>Email</label>
-    <input id="email" value="hammadmuqaddam@gmail.com"/>
-
-    <label>Product ID</label>
-    <input id="product" value="PROD-001"/>
-
-    <label>Quantity</label>
-    <input id="qty" value="1"/>
-
-    <button onclick="createOrder()">Create Order</button>
-
-    <pre id="orderResult"></pre>
-  </div>
-
-  <!-- STATUS -->
-  <div class="card">
-    <h2>Order Status</h2>
-
-    <label>Order ID</label>
-    <input id="orderId" />
-
-    <button onclick="getOrder()">Get Order</button>
-
-    <pre id="orderStatus"></pre>
-  </div>
-
-</div>
-
-<script>
-const API = "/api";
-
-async function checkHealth() {
-  const res = await fetch(API + "/health");
-  const data = await res.text();
-  document.getElementById("healthStatus").innerText = data;
-}
-
-async function loadInventory() {
-  const res = await fetch(API + "/inventory");
-  const data = await res.json();
-
-  let html = "<tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th></tr>";
-  data.forEach(p => {
-    html += `<tr>
-      <td>${p.id}</td>
-      <td>${p.name}</td>
-      <td>${p.price}</td>
-      <td>${p.stock}</td>
-    </tr>`;
-  });
-
-  document.getElementById("inventoryTable").innerHTML = html;
-}
-
-async function createOrder() {
-  const res = await fetch(API + "/orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      customer_email: document.getElementById("email").value,
-      items: [{
-        product_id: document.getElementById("product").value,
-        qty: parseInt(document.getElementById("qty").value)
-      }]
-    })
-  });
-
-  const data = await res.json();
-  document.getElementById("orderResult").innerText = JSON.stringify(data, null, 2);
-}
-
-async function getOrder() {
-  const id = document.getElementById("orderId").value;
-  const res = await fetch(API + "/orders/" + id);
-  const data = await res.json();
-
-  document.getElementById("orderStatus").innerText = JSON.stringify(data, null, 2);
-}
-</script>
-
+  <script src="/app.js"></script>
 </body>
 </html>
