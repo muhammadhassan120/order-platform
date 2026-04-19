@@ -25,7 +25,7 @@ document.getElementById('checkHealthBtn').addEventListener('click', async () => 
       healthBadge.textContent = `Healthy - ${data.timestamp || ''}`;
       healthBadge.className = 'badge success';
     } else {
-      healthBadge.textContent = 'Unhealthy';
+      healthBadge.textContent = data.error || 'Unhealthy';
       healthBadge.className = 'badge error';
     }
   } catch (error) {
