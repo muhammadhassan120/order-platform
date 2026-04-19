@@ -23,13 +23,11 @@ variable "db_host" {
 }
 
 variable "db_name" {
-  type    = string
-  default = "mydb"
+  type = string
 }
 
 variable "db_port" {
-  type    = number
-  default = 5432
+  type = number
 }
 
 variable "invoice_bucket_id" {
@@ -37,5 +35,9 @@ variable "invoice_bucket_id" {
 }
 
 variable "sns_topic_arn" {
+  type = string
+}
+
+variable "ses_from_email" {
   type = string
 }

@@ -16,6 +16,7 @@ resource "aws_instance" "jenkins" {
   iam_instance_profile        = var.jenkins_instance_profile_name
   key_name                    = var.key_pair_name
   associate_public_ip_address = true
+  user_data_replace_on_change = true
 
   user_data = <<-EOF
     #!/bin/bash
@@ -51,6 +52,7 @@ resource "aws_instance" "jenkins" {
 
     systemctl enable docker
     systemctl start docker
+
     usermod -aG docker ec2-user
 
     wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/rpm-stable/jenkins.repo
@@ -59,6 +61,8 @@ resource "aws_instance" "jenkins" {
     dnf clean all
     dnf makecache
     dnf install -y jenkins
+
+    usermod -aG docker jenkins
 
     TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
       -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
@@ -122,98 +126,6 @@ resource "aws_instance" "jenkins" {
     done
 
     curl -fsS -u admin:Admin@12345 "$LOCAL_JENKINS_URL/me/api/json" >/dev/null
-
-    wget -O /tmp/jenkins-cli.jar "$LOCAL_JENKINS_URL/jnlpJars/jenkins-cli.jar"
-
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      install-plugin \
-      git \
-      workflow-aggregator \
-      docker-workflow \
-      aws-credentials \
-      credentials-binding \
-      ws-cleanup \
-      pipeline-stage-view
-
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      safe-restart
-
-    for i in {1..180}; do
-      if curl -fsS "$LOCAL_JENKINS_URL/login" >/dev/null; then
-        echo "Jenkins is back after restart"
-        break
-      fi
-      sleep 5
-    done
-
-    curl -fsS -u admin:Admin@12345 "$LOCAL_JENKINS_URL/me/api/json" >/dev/null
-
-    echo "===== INSTALLED PLUGINS ====="
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      list-plugins | tee /tmp/jenkins-plugins.txt
-
-    grep -q "workflow-aggregator" /tmp/jenkins-plugins.txt
-    grep -q "workflow-cps" /tmp/jenkins-plugins.txt
-    grep -q "git" /tmp/jenkins-plugins.txt
-
-    cat > /tmp/order-platform-job.xml <<XML
-    <?xml version='1.1' encoding='UTF-8'?>
-    <flow-definition plugin="workflow-job">
-      <actions/>
-      <description>Order Platform CI/CD Pipeline</description>
-      <keepDependencies>false</keepDependencies>
-      <properties/>
-      <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
-        <scm class="hudson.plugins.git.GitSCM" plugin="git">
-          <configVersion>2</configVersion>
-          <userRemoteConfigs>
-            <hudson.plugins.git.UserRemoteConfig>
-              <url>${var.repo_url}</url>
-            </hudson.plugins.git.UserRemoteConfig>
-          </userRemoteConfigs>
-          <branches>
-            <hudson.plugins.git.BranchSpec>
-              <name>*/main</name>
-            </hudson.plugins.git.BranchSpec>
-          </branches>
-          <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
-          <submoduleCfg class="empty-list"/>
-          <extensions/>
-        </scm>
-        <scriptPath>Jenkinsfile</scriptPath>
-        <lightweight>true</lightweight>
-      </definition>
-      <triggers/>
-      <disabled>false</disabled>
-    </flow-definition>
-    XML
-
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      delete-job order-platform-pipeline || true
-
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      create-job order-platform-pipeline < /tmp/order-platform-job.xml
-
-    java -jar /tmp/jenkins-cli.jar \
-      -s "$LOCAL_JENKINS_URL" \
-      -http \
-      -auth admin:Admin@12345 \
-      list-jobs
 
     echo "===== JENKINS SETUP COMPLETE ====="
   EOF

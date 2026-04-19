@@ -1,29 +1,27 @@
 variable "name_prefix" {
-  type        = string
-  description = "Prefix for Lambda IAM resources"
+  type = string
 }
 
 variable "db_secret_arn" {
-  type        = string
-  description = "Secrets Manager ARN for database credentials"
+  type = string
 }
 
 variable "audit_table_arn" {
-  type        = string
-  description = "DynamoDB audit table ARN"
+  type = string
 }
 
-variable "invoice_bucket_arn" {
-  type        = string
-  description = "S3 invoice bucket ARN"
+variable "invoices_bucket_arn" {
+  type = string
 }
 
-variable "sns_topic_arn" {
-  type        = string
-  description = "SNS topic ARN for order notifications"
+variable "order_notifications_topic_arn" {
+  type = string
 }
 
 variable "order_queue_arn" {
-  type        = string
-  description = "SQS order queue ARN"
+  type = string
+}
+
+variable "ses_from_email" {
+  type = string
 }

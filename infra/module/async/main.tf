@@ -82,17 +82,18 @@ resource "aws_lambda_function" "order_processor" {
     security_group_ids = [var.lambda_security_group_id]
   }
 
-  environment {
-    variables = {
-      AUDIT_TABLE    = aws_dynamodb_table.audit_trail.name
-      DB_SECRET_ARN  = var.db_secret_arn
-      DB_HOST        = var.db_host
-      DB_NAME        = var.db_name
-      DB_PORT        = tostring(var.db_port)
-      INVOICE_BUCKET = var.invoice_bucket_id
-      SNS_TOPIC_ARN  = var.sns_topic_arn
-    }
+environment {
+  variables = {
+    AUDIT_TABLE     = aws_dynamodb_table.audit_trail.name
+    SNS_TOPIC_ARN   = var.sns_topic_arn
+    INVOICE_BUCKET  = var.invoice_bucket_id
+    DB_SECRET_ARN   = var.db_secret_arn
+    DB_HOST         = var.db_host
+    DB_NAME         = var.db_name
+    DB_PORT         = tostring(var.db_port)
+    SES_FROM_EMAIL  = var.ses_from_email
   }
+}
 
   depends_on = [
     aws_dynamodb_table.audit_trail

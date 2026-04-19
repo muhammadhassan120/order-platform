@@ -1,3 +1,6 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.name_prefix}-lambda-exec-role"
 
@@ -30,14 +33,13 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_execution" {
 }
 
 resource "aws_iam_policy" "lambda_custom" {
-  name_prefix = "${var.name_prefix}-lambda-custom-policy-"
+  name_prefix = "order-platform-lambda-custom-policy-"
   description = "Custom permissions for order processor Lambda"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SecretsManagerAccess"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
@@ -46,7 +48,6 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = var.db_secret_arn
       },
       {
-        Sid    = "DynamoDBAccess"
         Effect = "Allow"
         Action = [
           "dynamodb:PutItem",
@@ -56,24 +57,28 @@ resource "aws_iam_policy" "lambda_custom" {
         Resource = var.audit_table_arn
       },
       {
-        Sid    = "S3InvoiceAccess"
         Effect = "Allow"
         Action = [
           "s3:PutObject",
           "s3:GetObject"
         ]
-        Resource = "${var.invoice_bucket_arn}/*"
+        Resource = "${var.invoices_bucket_arn}/*"
       },
       {
-        Sid    = "SNSPublishAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = var.invoices_bucket_arn
+      },
+      {
         Effect = "Allow"
         Action = [
           "sns:Publish"
         ]
-        Resource = var.sns_topic_arn
+        Resource = var.order_notifications_topic_arn
       },
       {
-        Sid    = "SQSAccess"
         Effect = "Allow"
         Action = [
           "sqs:ReceiveMessage",
@@ -82,13 +87,17 @@ resource "aws_iam_policy" "lambda_custom" {
           "sqs:ChangeMessageVisibility"
         ]
         Resource = var.order_queue_arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "arn:aws:ses:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:identity/${var.ses_from_email}"
       }
     ]
   })
-
-  tags = {
-    Name = "${var.name_prefix}-lambda-custom-policy"
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_custom_attach" {
