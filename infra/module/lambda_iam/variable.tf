@@ -18,6 +18,10 @@ variable "order_notifications_topic_arn" {
   type = string
 }
 
+variable "ops_alerts_topic_arn" {
+  type = string
+}
+
 variable "order_queue_arn" {
   type = string
 }

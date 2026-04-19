@@ -1,1 +1,1 @@
-ses_from_email = "muqaddamhammad@gmail.com"
+ses_from_email = "hammadmuqaddam@gmail.com"

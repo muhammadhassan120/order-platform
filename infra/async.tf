@@ -11,8 +11,9 @@ module "async" {
   db_host       = split(":", module.rds.db_endpoint)[0]
   db_name       = "mydb"
   db_port       = 5432
-  ses_from_email = var.ses_from_email
 
-  invoice_bucket_id = module.s3.invoice_bucket_name
-  sns_topic_arn     = module.sns.order_notifications_topic_arn
+  invoice_bucket_id   = module.s3.invoice_bucket_name
+  sns_topic_arn       = module.sns.order_notifications_topic_arn
+  ops_alert_topic_arn = module.sns.ops_alerts_topic_arn
+  ses_from_email      = var.ses_from_email
 }

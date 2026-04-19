@@ -38,6 +38,10 @@ variable "sns_topic_arn" {
   type = string
 }
 
+variable "ops_alert_topic_arn" {
+  type = string
+}
+
 variable "ses_from_email" {
   type = string
 }

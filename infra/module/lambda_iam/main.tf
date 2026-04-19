@@ -76,7 +76,10 @@ resource "aws_iam_policy" "lambda_custom" {
         Action = [
           "sns:Publish"
         ]
-        Resource = var.order_notifications_topic_arn
+        Resource = [
+          var.order_notifications_topic_arn,
+          var.ops_alerts_topic_arn
+        ]
       },
       {
         Effect = "Allow"
