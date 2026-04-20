@@ -33,7 +33,7 @@ resource "aws_db_instance" "default" {
 }
 
 resource "aws_secretsmanager_secret" "db_password" {
-  name                    = "${var.name_prefix}-db-credentials-order-processing"
+  name                    = "${var.name_prefix}-db-credentials-order-processing-2"
   recovery_window_in_days = 0
 
   tags = {

@@ -240,9 +240,10 @@ resource "aws_iam_instance_profile" "jenkins_instance_profile" {
 
 
 
-# ==============================
+# 
 # ECS TASK EXECUTION ROLE
-# ==============================
+# 
+
 
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "${var.name_prefix}-ecs-task-execution-role"
@@ -270,9 +271,9 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# ==============================
+# 
 # ECS TASK ROLE
-# ==============================
+# 
 
 resource "aws_iam_role" "ecs_task_role" {
   name = "${var.name_prefix}-ecs-task-role"
@@ -295,8 +296,6 @@ resource "aws_iam_role" "ecs_task_role" {
   }
 }
 
-# Optional custom policy for app container
-# Adjust these permissions later according to your actual app needs
 
 resource "aws_iam_policy" "ecs_task_custom_policy" {
   name        = "${var.name_prefix}-ecs-task-custom-policy"

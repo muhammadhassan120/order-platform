@@ -3,5 +3,5 @@ module "security" {
 
   vpc_id      = module.vpc.vpc_id
   name_prefix = "order-platform"
-  admin_cidr  = "182.189.92.252/32"
+  admin_cidr  = "182.189.97.68/32"
 }

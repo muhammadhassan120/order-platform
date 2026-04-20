@@ -39,6 +39,8 @@ resource "aws_iam_policy" "lambda_custom" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+
+      # Secrets Manager
       {
         Effect = "Allow"
         Action = [
@@ -47,6 +49,8 @@ resource "aws_iam_policy" "lambda_custom" {
         ]
         Resource = var.db_secret_arn
       },
+
+      # DynamoDB
       {
         Effect = "Allow"
         Action = [
@@ -56,6 +60,8 @@ resource "aws_iam_policy" "lambda_custom" {
         ]
         Resource = var.audit_table_arn
       },
+
+      # S3 (invoices)
       {
         Effect = "Allow"
         Action = [
@@ -71,6 +77,8 @@ resource "aws_iam_policy" "lambda_custom" {
         ]
         Resource = var.invoices_bucket_arn
       },
+
+      # SNS
       {
         Effect = "Allow"
         Action = [
@@ -81,6 +89,8 @@ resource "aws_iam_policy" "lambda_custom" {
           var.ops_alerts_topic_arn
         ]
       },
+
+      # SQS
       {
         Effect = "Allow"
         Action = [
@@ -91,14 +101,17 @@ resource "aws_iam_policy" "lambda_custom" {
         ]
         Resource = var.order_queue_arn
       },
+
+      # SES PERMISSION TO SEND EMAIL
       {
         Effect = "Allow"
         Action = [
           "ses:SendEmail",
           "ses:SendRawEmail"
         ]
-        Resource = "arn:aws:ses:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:identity/${var.ses_from_email}"
+        Resource = "arn:aws:ses:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:identity/*"
       }
+
     ]
   })
 }

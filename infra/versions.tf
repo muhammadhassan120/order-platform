@@ -23,7 +23,7 @@ terraform {
     }
   }
 
-  # OPTIONAL (if you already use S3 backend, keep it, otherwise remove)
+
   backend "s3" {
     bucket = "event-driven-state-key"
     key    = "event-driven/terraform.tfstate"
