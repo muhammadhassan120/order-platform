@@ -4,18 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Order Platform Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=JetBrains+Mono:wght@500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="noise-layer" aria-hidden="true"></div>
+  <div class="cursor-glow" aria-hidden="true"></div>
   <div class="ambient-grid" aria-hidden="true"></div>
 
   <div class="app-shell">
-    <header class="topbar">
+    <header class="topbar reveal-card interactive-surface">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
           <span>OP</span>
         </div>
-        <div>
+        <div class="brand-copy">
           <p class="eyebrow">AWS Event-Driven Order Platform</p>
           <h1>Order Operations Console</h1>
         </div>
@@ -39,38 +44,49 @@
       </div>
     </header>
 
-    <section class="hero-panel">
+    <section class="hero-panel reveal-card interactive-surface">
       <div class="hero-copy">
-        <p class="section-kicker">Live fulfillment desk</p>
-        <h2>Monitor inventory, submit orders, and trace async processing from one command surface.</h2>
+        <p class="section-kicker">Dark luxury command center</p>
+        <h2>Operate the order pipeline with boardroom-grade clarity.</h2>
+        <p class="hero-text">
+          Monitor inventory, submit orders, and trace async processing from one precise surface.
+        </p>
       </div>
 
-      <div class="hero-signal" aria-label="Current deployment flow">
-        <span>CloudFront</span>
-        <span>ALB</span>
-        <span>ECS</span>
-        <span>SQS</span>
-        <span>Lambda</span>
+      <div class="hero-console" aria-label="Current deployment flow">
+        <div class="console-header">
+          <span></span>
+          <span></span>
+          <span></span>
+          <strong>pipeline.live</strong>
+        </div>
+        <div class="hero-signal">
+          <span>CloudFront</span>
+          <span>ALB</span>
+          <span>ECS</span>
+          <span>SQS</span>
+          <span>Lambda</span>
+        </div>
       </div>
     </section>
 
     <section class="metric-grid" aria-label="Platform status">
-      <article class="metric-tile reveal-card">
+      <article class="metric-tile reveal-card interactive-surface">
         <span class="metric-label">Service</span>
         <strong id="serviceState">Awaiting check</strong>
         <small>Health endpoint</small>
       </article>
-      <article class="metric-tile reveal-card">
+      <article class="metric-tile reveal-card interactive-surface">
         <span class="metric-label">Inventory</span>
         <strong id="inventoryCount">No data</strong>
         <small>RDS catalog</small>
       </article>
-      <article class="metric-tile reveal-card">
+      <article class="metric-tile reveal-card interactive-surface">
         <span class="metric-label">Last order</span>
         <strong id="lastOrderId">None</strong>
         <small>Recent activity</small>
       </article>
-      <article class="metric-tile reveal-card">
+      <article class="metric-tile reveal-card interactive-surface">
         <span class="metric-label">Pipeline target</span>
         <strong id="pipelineState">ECS Fargate</strong>
         <small>Jenkins deploy</small>
@@ -78,7 +94,7 @@
     </section>
 
     <main class="workspace">
-      <section class="panel inventory-panel reveal-card">
+      <section class="panel inventory-panel reveal-card interactive-surface">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Catalog</p>
@@ -113,7 +129,7 @@
         </div>
       </section>
 
-      <section class="panel order-panel reveal-card">
+      <section class="panel order-panel reveal-card interactive-surface">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Checkout</p>
@@ -154,7 +170,7 @@
         <pre id="createOrderResult" class="result" aria-live="polite">No order created yet.</pre>
       </section>
 
-      <section class="panel lookup-panel reveal-card">
+      <section class="panel lookup-panel reveal-card interactive-surface">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Trace</p>
@@ -180,7 +196,7 @@
       </section>
 
       <aside class="side-stack">
-        <section class="panel flow-panel reveal-card">
+        <section class="panel flow-panel reveal-card interactive-surface">
           <div class="panel-header">
             <div>
               <p class="section-kicker">Runtime</p>
@@ -188,22 +204,22 @@
             </div>
           </div>
           <div class="flow-map" aria-label="Order processing event flow">
-            <div class="flow-node active">API</div>
+            <div class="flow-node active interactive-surface">API</div>
             <div class="flow-line"></div>
-            <div class="flow-node">RDS</div>
+            <div class="flow-node interactive-surface">RDS</div>
             <div class="flow-line"></div>
-            <div class="flow-node">SQS</div>
+            <div class="flow-node interactive-surface">SQS</div>
             <div class="flow-line pulse"></div>
-            <div class="flow-node">Lambda</div>
+            <div class="flow-node interactive-surface">Lambda</div>
             <div class="flow-branches">
-              <span>S3</span>
-              <span>DynamoDB</span>
-              <span>SNS</span>
+              <span class="interactive-surface">S3</span>
+              <span class="interactive-surface">DynamoDB</span>
+              <span class="interactive-surface">SNS</span>
             </div>
           </div>
         </section>
 
-        <section class="panel endpoint-panel reveal-card">
+        <section class="panel endpoint-panel reveal-card interactive-surface">
           <div class="panel-header">
             <div>
               <p class="section-kicker">API</p>
@@ -211,14 +227,14 @@
             </div>
           </div>
           <div class="endpoint-list">
-            <div><span>GET</span><code>/health</code></div>
-            <div><span>GET</span><code>/inventory</code></div>
-            <div><span>POST</span><code>/orders</code></div>
-            <div><span>GET</span><code>/orders/:id</code></div>
+            <div class="interactive-surface"><span>GET</span><code>/health</code></div>
+            <div class="interactive-surface"><span>GET</span><code>/inventory</code></div>
+            <div class="interactive-surface"><span>POST</span><code>/orders</code></div>
+            <div class="interactive-surface"><span>GET</span><code>/orders/:id</code></div>
           </div>
         </section>
 
-        <section class="panel activity-panel reveal-card">
+        <section class="panel activity-panel reveal-card interactive-surface">
           <div class="panel-header">
             <div>
               <p class="section-kicker">Activity</p>

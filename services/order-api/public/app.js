@@ -1,3 +1,6 @@
+const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+const finePointerQuery = window.matchMedia('(pointer: fine)');
+
 function prettyJson(data) {
   return JSON.stringify(data, null, 2);
 }
@@ -56,12 +59,14 @@ function setButtonBusy(button, isBusy, busyText) {
     button.dataset.defaultLabel = label ? label.textContent.trim() : button.textContent.trim();
     button.disabled = true;
     button.classList.add('is-busy');
+    button.setAttribute('aria-busy', 'true');
     if (label && busyText) label.textContent = busyText;
     return;
   }
 
   button.disabled = false;
   button.classList.remove('is-busy');
+  button.removeAttribute('aria-busy');
 
   if (button.dataset.defaultLabel && label) {
     label.textContent = button.dataset.defaultLabel;
@@ -71,12 +76,15 @@ function setButtonBusy(button, isBusy, busyText) {
 function renderResult(target, payload, state = 'default') {
   target.textContent = prettyJson(payload);
   target.className = `result ${state === 'compact' ? 'compact' : ''}`.trim();
+
+  if (!target.animate || motionQuery.matches) return;
+
   target.animate(
     [
-      { opacity: 0.65, transform: 'translateY(4px)' },
-      { opacity: 1, transform: 'translateY(0)' }
+      { opacity: 0.62, transform: 'translate3d(0, 6px, 0)' },
+      { opacity: 1, transform: 'translate3d(0, 0, 0)' }
     ],
-    { duration: 220, easing: 'ease-out' }
+    { duration: 260, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }
   );
 }
 
@@ -95,7 +103,7 @@ function addActivity(message) {
   item.append(time, text);
   feed.prepend(item);
 
-  while (feed.children.length > 5) {
+  while (feed.children.length > 6) {
     feed.lastElementChild.remove();
   }
 }
@@ -118,8 +126,8 @@ function setHealthState(kind, message, timestamp = '') {
 }
 
 function renderInventorySkeleton() {
-  const inventoryTableBody = document.querySelector('#inventoryTable tbody');
-  inventoryTableBody.innerHTML = Array.from({ length: 4 }).map(() => `
+  const tableBody = document.querySelector('#inventoryTable tbody');
+  tableBody.innerHTML = Array.from({ length: 4 }).map(() => `
     <tr class="skeleton-row">
       <td><span></span></td>
       <td><span></span></td>
@@ -130,10 +138,10 @@ function renderInventorySkeleton() {
 }
 
 function renderInventoryRows(items) {
-  const inventoryTableBody = document.querySelector('#inventoryTable tbody');
+  const tableBody = document.querySelector('#inventoryTable tbody');
 
   if (!Array.isArray(items) || items.length === 0) {
-    inventoryTableBody.innerHTML = `
+    tableBody.innerHTML = `
       <tr>
         <td colspan="4" class="empty-cell">No inventory found.</td>
       </tr>
@@ -141,7 +149,7 @@ function renderInventoryRows(items) {
     return;
   }
 
-  inventoryTableBody.innerHTML = items.map((item, index) => `
+  tableBody.innerHTML = items.map((item, index) => `
     <tr data-product-id="${escapeHtml(item.id)}" tabindex="0" style="--row-index:${index}">
       <td><span class="mono">${escapeHtml(item.id)}</span></td>
       <td>${escapeHtml(item.name)}</td>
@@ -162,15 +170,128 @@ function addRipple(event) {
   const ripple = document.createElement('span');
   const rect = button.getBoundingClientRect();
   const size = Math.max(rect.width, rect.height);
+  const hasPointer = event.clientX !== 0 || event.clientY !== 0;
+  const x = hasPointer ? event.clientX - rect.left : rect.width / 2;
+  const y = hasPointer ? event.clientY - rect.top : rect.height / 2;
 
   ripple.className = 'ripple';
   ripple.style.width = `${size}px`;
   ripple.style.height = `${size}px`;
-  ripple.style.left = `${event.clientX - rect.left - size / 2}px`;
-  ripple.style.top = `${event.clientY - rect.top - size / 2}px`;
+  ripple.style.left = `${x - size / 2}px`;
+  ripple.style.top = `${y - size / 2}px`;
 
   button.appendChild(ripple);
   ripple.addEventListener('animationend', () => ripple.remove());
+}
+
+function animateMetricNumber(element, value, suffix = '', prefix = '') {
+  const target = Number(value);
+  if (!element || Number.isNaN(target)) return;
+
+  if (motionQuery.matches) {
+    element.textContent = `${prefix}${target}${suffix}`;
+    return;
+  }
+
+  const start = 0;
+  const duration = 1200;
+  const startTime = performance.now();
+
+  function easeOutCubic(progress) {
+    return 1 - Math.pow(1 - progress, 3);
+  }
+
+  function step(now) {
+    const progress = Math.min((now - startTime) / duration, 1);
+    const current = Math.round(start + (target - start) * easeOutCubic(progress));
+    element.textContent = `${prefix}${current}${suffix}`;
+
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+
+  requestAnimationFrame(step);
+}
+
+function shakeElement(element) {
+  if (!element || motionQuery.matches) return;
+
+  element.classList.remove('is-shaking');
+  window.requestAnimationFrame(() => {
+    element.classList.add('is-shaking');
+    window.setTimeout(() => element.classList.remove('is-shaking'), 480);
+  });
+}
+
+function initRevealObserver() {
+  const targets = document.querySelectorAll('.reveal-card');
+
+  targets.forEach((target, index) => {
+    target.style.setProperty('--reveal-index', index);
+  });
+
+  if (motionQuery.matches || !('IntersectionObserver' in window)) {
+    targets.forEach((target) => target.classList.add('is-visible'));
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('is-visible');
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.1 });
+
+  targets.forEach((target) => observer.observe(target));
+}
+
+function initSurfaceGlow() {
+  if (!finePointerQuery.matches) return;
+
+  document.querySelectorAll('.interactive-surface').forEach((surface) => {
+    surface.addEventListener('pointermove', (event) => {
+      const rect = surface.getBoundingClientRect();
+      surface.style.setProperty('--x', `${event.clientX - rect.left}px`);
+      surface.style.setProperty('--y', `${event.clientY - rect.top}px`);
+    });
+  });
+}
+
+function initCursorGlow() {
+  const glow = document.querySelector('.cursor-glow');
+  if (!glow || !finePointerQuery.matches || motionQuery.matches) return;
+
+  let pointerX = window.innerWidth / 2;
+  let pointerY = window.innerHeight / 2;
+  let glowX = pointerX;
+  let glowY = pointerY;
+
+  window.addEventListener('pointermove', (event) => {
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+  }, { passive: true });
+
+  function updateGlow() {
+    glowX += (pointerX - glowX) * 0.18;
+    glowY += (pointerY - glowY) * 0.18;
+    glow.style.transform = `translate3d(${glowX}px, ${glowY}px, 0) translate3d(-50%, -50%, 0)`;
+    requestAnimationFrame(updateGlow);
+  }
+
+  updateGlow();
+}
+
+function initClock() {
+  const systemTime = document.getElementById('systemTime');
+
+  function updateTime() {
+    systemTime.textContent = `Local time ${formatClock()}`;
+    window.setTimeout(updateTime, 1000);
+  }
+
+  updateTime();
 }
 
 const checkHealthBtn = document.getElementById('checkHealthBtn');
@@ -181,16 +302,20 @@ const getOrderResult = document.getElementById('getOrderResult');
 const inventoryCount = document.getElementById('inventoryCount');
 const lastOrderId = document.getElementById('lastOrderId');
 const pipelineState = document.getElementById('pipelineState');
-const systemTime = document.getElementById('systemTime');
+
+initRevealObserver();
+initSurfaceGlow();
+initCursorGlow();
+initClock();
 
 document.querySelectorAll('.button').forEach((button) => {
   button.addEventListener('click', addRipple);
 });
 
-systemTime.textContent = `Local time ${formatClock()}`;
-setInterval(() => {
-  systemTime.textContent = `Local time ${formatClock()}`;
-}, 1000);
+document.querySelectorAll('input').forEach((input) => {
+  input.addEventListener('invalid', () => shakeElement(input.closest('form')));
+  input.addEventListener('input', () => input.classList.remove('is-invalid'));
+});
 
 checkHealthBtn.addEventListener('click', async () => {
   setButtonBusy(checkHealthBtn, true, 'Checking');
@@ -239,7 +364,7 @@ loadInventoryBtn.addEventListener('click', async () => {
     }
 
     renderInventoryRows(data);
-    inventoryCount.textContent = `${data.length} products`;
+    animateMetricNumber(inventoryCount, data.length, ' products');
     setInventoryStatus(`Inventory loaded successfully. ${data.length} products available.`, 'success');
     addActivity(`Inventory loaded: ${data.length} products.`);
   } catch (error) {
@@ -259,7 +384,7 @@ inventoryTableBody.addEventListener('click', (event) => {
   document.getElementById('productId').value = row.dataset.productId;
   document.getElementById('qty').value = '1';
   row.classList.add('selected-row');
-  setTimeout(() => row.classList.remove('selected-row'), 700);
+  window.setTimeout(() => row.classList.remove('selected-row'), 700);
   addActivity(`Selected ${row.dataset.productId} for checkout.`);
 });
 
@@ -287,6 +412,7 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
     renderResult(createOrderResult, {
       error: 'customer_email, product_id, and qty > 0 are required'
     });
+    shakeElement(form);
     addActivity('Order form validation failed.');
     return;
   }
@@ -321,7 +447,7 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
     renderResult(createOrderResult, result);
 
     if (response.status === 201 && data.order_id) {
-      lastOrderId.textContent = `#${data.order_id}`;
+      animateMetricNumber(lastOrderId, data.order_id, '', '#');
       document.getElementById('orderId').value = data.order_id;
       pipelineState.textContent = 'Order queued';
       addActivity(`Order #${data.order_id} queued.`);
@@ -353,6 +479,7 @@ document.getElementById('getOrderForm').addEventListener('submit', async (event)
 
   if (!orderId) {
     renderResult(getOrderResult, { error: 'Order ID is required' }, 'compact');
+    shakeElement(form);
     addActivity('Order lookup validation failed.');
     return;
   }
@@ -372,7 +499,7 @@ document.getElementById('getOrderForm').addEventListener('submit', async (event)
     renderResult(getOrderResult, result, 'compact');
 
     if (response.ok && data.status) {
-      lastOrderId.textContent = `#${orderId}`;
+      animateMetricNumber(lastOrderId, orderId, '', '#');
       pipelineState.textContent = `Order ${data.status}`;
       addActivity(`Order #${orderId} is ${data.status}.`);
       return;
