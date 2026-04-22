@@ -7,10 +7,14 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="ambient-grid" aria-hidden="true"></div>
+
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark" aria-hidden="true">OP</div>
+        <div class="brand-mark" aria-hidden="true">
+          <span>OP</span>
+        </div>
         <div>
           <p class="eyebrow">AWS Event-Driven Order Platform</p>
           <h1>Order Operations Console</h1>
@@ -18,7 +22,11 @@
       </div>
 
       <div class="topbar-actions">
-        <button id="checkHealthBtn" class="button primary" type="button">
+        <div class="runtime-pill">
+          <span class="runtime-dot"></span>
+          <span id="systemTime">Console ready</span>
+        </div>
+        <button id="checkHealthBtn" class="button primary magnetic" type="button">
           <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L15 9h7V2l-2.9 2.9A9.96 9.96 0 0 0 12 2z" />
           </svg>
@@ -31,33 +39,52 @@
       </div>
     </header>
 
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="section-kicker">Live fulfillment desk</p>
+        <h2>Monitor inventory, submit orders, and trace async processing from one command surface.</h2>
+      </div>
+
+      <div class="hero-signal" aria-label="Current deployment flow">
+        <span>CloudFront</span>
+        <span>ALB</span>
+        <span>ECS</span>
+        <span>SQS</span>
+        <span>Lambda</span>
+      </div>
+    </section>
+
     <section class="metric-grid" aria-label="Platform status">
-      <article class="metric-tile">
+      <article class="metric-tile reveal-card">
         <span class="metric-label">Service</span>
         <strong id="serviceState">Awaiting check</strong>
+        <small>Health endpoint</small>
       </article>
-      <article class="metric-tile">
+      <article class="metric-tile reveal-card">
         <span class="metric-label">Inventory</span>
         <strong id="inventoryCount">No data</strong>
+        <small>RDS catalog</small>
       </article>
-      <article class="metric-tile">
+      <article class="metric-tile reveal-card">
         <span class="metric-label">Last order</span>
         <strong id="lastOrderId">None</strong>
+        <small>Recent activity</small>
       </article>
-      <article class="metric-tile">
+      <article class="metric-tile reveal-card">
         <span class="metric-label">Pipeline target</span>
         <strong id="pipelineState">ECS Fargate</strong>
+        <small>Jenkins deploy</small>
       </article>
     </section>
 
     <main class="workspace">
-      <section class="panel inventory-panel">
+      <section class="panel inventory-panel reveal-card">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Catalog</p>
             <h2>Inventory</h2>
           </div>
-          <button id="loadInventoryBtn" class="button secondary" type="button">
+          <button id="loadInventoryBtn" class="button secondary magnetic" type="button">
             <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 4h16v2H4V4zm0 7h16v2H4v-2zm0 7h16v2H4v-2z" />
             </svg>
@@ -86,18 +113,19 @@
         </div>
       </section>
 
-      <section class="panel order-panel">
+      <section class="panel order-panel reveal-card">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Checkout</p>
             <h2>Create Order</h2>
           </div>
+          <div class="mini-badge">POST /orders</div>
         </div>
 
         <form id="createOrderForm" class="form-grid">
           <label>
             <span>Customer Email</span>
-            <input type="email" id="customerEmail" placeholder="customer@example.com" required />
+            <input type="email" id="customerEmail" placeholder="customer@example.com" autocomplete="email" required />
           </label>
 
           <div class="split-fields">
@@ -113,25 +141,26 @@
           </div>
 
           <div class="button-row">
-            <button class="button primary" type="submit">
+            <button class="button primary magnetic" type="submit">
               <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7.2 14h7.45c.75 0 1.41-.41 1.75-1.03L20 6H6.21L5.27 4H2v2h2l3.6 7.59L6.25 16A1 1 0 0 0 7.13 17H19v-2H8.42l.78-1z" />
               </svg>
               <span>Create Order</span>
             </button>
-            <button id="orderFormReset" class="button ghost" type="reset">Reset</button>
+            <button id="orderFormReset" class="button ghost magnetic" type="reset">Reset</button>
           </div>
         </form>
 
         <pre id="createOrderResult" class="result" aria-live="polite">No order created yet.</pre>
       </section>
 
-      <section class="panel lookup-panel">
+      <section class="panel lookup-panel reveal-card">
         <div class="panel-header">
           <div>
             <p class="section-kicker">Trace</p>
             <h2>Order Status</h2>
           </div>
+          <div class="mini-badge">GET /orders/:id</div>
         </div>
 
         <form id="getOrderForm" class="lookup-form">
@@ -139,7 +168,7 @@
             <span>Order ID</span>
             <input type="number" id="orderId" min="1" placeholder="1" required />
           </label>
-          <button class="button secondary" type="submit">
+          <button class="button secondary magnetic" type="submit">
             <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M9.5 3a6.5 6.5 0 0 1 5.17 10.44l4.44 4.45-1.42 1.41-4.44-4.44A6.5 6.5 0 1 1 9.5 3zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
             </svg>
@@ -151,7 +180,7 @@
       </section>
 
       <aside class="side-stack">
-        <section class="panel flow-panel">
+        <section class="panel flow-panel reveal-card">
           <div class="panel-header">
             <div>
               <p class="section-kicker">Runtime</p>
@@ -164,7 +193,7 @@
             <div class="flow-node">RDS</div>
             <div class="flow-line"></div>
             <div class="flow-node">SQS</div>
-            <div class="flow-line"></div>
+            <div class="flow-line pulse"></div>
             <div class="flow-node">Lambda</div>
             <div class="flow-branches">
               <span>S3</span>
@@ -174,7 +203,7 @@
           </div>
         </section>
 
-        <section class="panel endpoint-panel">
+        <section class="panel endpoint-panel reveal-card">
           <div class="panel-header">
             <div>
               <p class="section-kicker">API</p>
@@ -187,6 +216,21 @@
             <div><span>POST</span><code>/orders</code></div>
             <div><span>GET</span><code>/orders/:id</code></div>
           </div>
+        </section>
+
+        <section class="panel activity-panel reveal-card">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Activity</p>
+              <h2>Console Events</h2>
+            </div>
+          </div>
+          <ol id="activityFeed" class="activity-feed" aria-live="polite">
+            <li>
+              <span class="activity-time">Now</span>
+              <span>Frontend console initialized.</span>
+            </li>
+          </ol>
         </section>
       </aside>
     </main>
