@@ -3,101 +3,192 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Order Platform</title>
+  <title>Order Platform Console</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="page">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">AWS Event-Driven Order Platform</p>
-        <h1>Order Management UI</h1>
-        <p class="subtext">
-          Simple browser UI for inventory, order creation, health check, and order status lookup.
-        </p>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">OP</div>
+        <div>
+          <p class="eyebrow">AWS Event-Driven Order Platform</p>
+          <h1>Order Operations Console</h1>
+        </div>
       </div>
-      <div class="hero-actions">
-        <button id="checkHealthBtn">Check Health</button>
-        <div id="healthBadge" class="badge neutral">Not checked</div>
+
+      <div class="topbar-actions">
+        <button id="checkHealthBtn" class="button primary" type="button">
+          <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L15 9h7V2l-2.9 2.9A9.96 9.96 0 0 0 12 2z" />
+          </svg>
+          <span>Check Health</span>
+        </button>
+        <div id="healthBadge" class="status-chip neutral" aria-live="polite">
+          <span class="status-dot"></span>
+          <span>Not checked</span>
+        </div>
       </div>
     </header>
 
-    <main class="grid">
-      <section class="card">
-        <h2>Inventory</h2>
-        <p class="muted">Fetch products from the backend database.</p>
-        <button id="loadInventoryBtn">Load Inventory</button>
+    <section class="metric-grid" aria-label="Platform status">
+      <article class="metric-tile">
+        <span class="metric-label">Service</span>
+        <strong id="serviceState">Awaiting check</strong>
+      </article>
+      <article class="metric-tile">
+        <span class="metric-label">Inventory</span>
+        <strong id="inventoryCount">No data</strong>
+      </article>
+      <article class="metric-tile">
+        <span class="metric-label">Last order</span>
+        <strong id="lastOrderId">None</strong>
+      </article>
+      <article class="metric-tile">
+        <span class="metric-label">Pipeline target</span>
+        <strong id="pipelineState">ECS Fargate</strong>
+      </article>
+    </section>
+
+    <main class="workspace">
+      <section class="panel inventory-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">Catalog</p>
+            <h2>Inventory</h2>
+          </div>
+          <button id="loadInventoryBtn" class="button secondary" type="button">
+            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 4h16v2H4V4zm0 7h16v2H4v-2zm0 7h16v2H4v-2z" />
+            </svg>
+            <span>Load Inventory</span>
+          </button>
+        </div>
+
+        <div id="inventoryStatus" class="inline-status">Inventory has not been loaded.</div>
+
         <div class="table-wrap">
           <table id="inventoryTable">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Price</th>
-                <th>Stock</th>
+                <th scope="col">Product ID</th>
+                <th scope="col">Name</th>
+                <th scope="col">Price</th>
+                <th scope="col">Stock</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="4">No data yet</td></tr>
+              <tr>
+                <td colspan="4" class="empty-cell">No inventory data yet.</td>
+              </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="card">
-        <h2>Create Order</h2>
-        <p class="muted">Create a new order using one product and quantity.</p>
+      <section class="panel order-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">Checkout</p>
+            <h2>Create Order</h2>
+          </div>
+        </div>
 
-        <form id="createOrderForm">
+        <form id="createOrderForm" class="form-grid">
           <label>
-            Customer Email
+            <span>Customer Email</span>
             <input type="email" id="customerEmail" placeholder="customer@example.com" required />
           </label>
 
-          <label>
-            Product ID
-            <input type="text" id="productId" placeholder="PROD-001" required />
-          </label>
+          <div class="split-fields">
+            <label>
+              <span>Product ID</span>
+              <input type="text" id="productId" placeholder="PROD-001" required />
+            </label>
 
-          <label>
-            Quantity
-            <input type="number" id="qty" min="1" value="1" required />
-          </label>
+            <label>
+              <span>Qty</span>
+              <input type="number" id="qty" min="1" value="1" required />
+            </label>
+          </div>
 
-          <button type="submit">Create Order</button>
+          <div class="button-row">
+            <button class="button primary" type="submit">
+              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM7.2 14h7.45c.75 0 1.41-.41 1.75-1.03L20 6H6.21L5.27 4H2v2h2l3.6 7.59L6.25 16A1 1 0 0 0 7.13 17H19v-2H8.42l.78-1z" />
+              </svg>
+              <span>Create Order</span>
+            </button>
+            <button id="orderFormReset" class="button ghost" type="reset">Reset</button>
+          </div>
         </form>
 
-        <pre id="createOrderResult" class="result">No order created yet</pre>
+        <pre id="createOrderResult" class="result" aria-live="polite">No order created yet.</pre>
       </section>
 
-      <section class="card">
-        <h2>Get Order Status</h2>
-        <p class="muted">Check order status by order ID.</p>
+      <section class="panel lookup-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">Trace</p>
+            <h2>Order Status</h2>
+          </div>
+        </div>
 
-        <form id="getOrderForm">
+        <form id="getOrderForm" class="lookup-form">
           <label>
-            Order ID
+            <span>Order ID</span>
             <input type="number" id="orderId" min="1" placeholder="1" required />
           </label>
-
-          <button type="submit">Get Order</button>
+          <button class="button secondary" type="submit">
+            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9.5 3a6.5 6.5 0 0 1 5.17 10.44l4.44 4.45-1.42 1.41-4.44-4.44A6.5 6.5 0 1 1 9.5 3zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
+            </svg>
+            <span>Get Order</span>
+          </button>
         </form>
 
-        <pre id="getOrderResult" class="result">No order fetched yet</pre>
+        <pre id="getOrderResult" class="result compact" aria-live="polite">No order fetched yet.</pre>
       </section>
 
-      <section class="card">
-        <h2>API Info</h2>
-        <div class="kv">
-          <div><strong>Health:</strong> <code>GET /health</code></div>
-          <div><strong>Inventory:</strong> <code>GET /inventory</code></div>
-          <div><strong>Create Order:</strong> <code>POST /orders</code></div>
-          <div><strong>Get Order:</strong> <code>GET /orders/:id</code></div>
-        </div>
-        <p class="muted">
-          If you deploy this on ECS behind ALB or CloudFront, open the root URL in Chrome and this UI will appear.
-        </p>
-      </section>
+      <aside class="side-stack">
+        <section class="panel flow-panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Runtime</p>
+              <h2>Event Flow</h2>
+            </div>
+          </div>
+          <div class="flow-map" aria-label="Order processing event flow">
+            <div class="flow-node active">API</div>
+            <div class="flow-line"></div>
+            <div class="flow-node">RDS</div>
+            <div class="flow-line"></div>
+            <div class="flow-node">SQS</div>
+            <div class="flow-line"></div>
+            <div class="flow-node">Lambda</div>
+            <div class="flow-branches">
+              <span>S3</span>
+              <span>DynamoDB</span>
+              <span>SNS</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel endpoint-panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">API</p>
+              <h2>Endpoints</h2>
+            </div>
+          </div>
+          <div class="endpoint-list">
+            <div><span>GET</span><code>/health</code></div>
+            <div><span>GET</span><code>/inventory</code></div>
+            <div><span>POST</span><code>/orders</code></div>
+            <div><span>GET</span><code>/orders/:id</code></div>
+          </div>
+        </section>
+      </aside>
     </main>
   </div>
 
