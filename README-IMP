@@ -1,0 +1,1171 @@
+# README-IMP
+
+# Client Implementation and Handoff Guide
+
+This guide was written from the files in this project. It explains what the client must create, edit, run, and verify to deploy the project in their own AWS account.
+
+## 1. Project Overview
+
+This project is an event-driven order processing platform.
+
+In simple terms, a user opens a web UI, views inventory, creates an order, and checks order status. The API stores the order in PostgreSQL, sends a message to SQS, and a Lambda function processes the order in the background. After processing, the Lambda updates the order, writes an audit record, stores an invoice file in S3, and sends notifications through AWS services.
+
+The main application flow is:
+
+1. Browser opens the built-in UI from the Order API.
+2. CloudFront sends traffic to the Application Load Balancer.
+3. The Application Load Balancer forwards traffic to the ECS Fargate service.
+4. The ECS container runs the Node.js Order API on port `3000`.
+5. The API connects to RDS PostgreSQL using credentials from AWS Secrets Manager.
+6. When an order is created, the API writes the order to RDS and sends a message to SQS.
+7. SQS triggers the Python Lambda order processor.
+8. Lambda updates RDS, writes an audit record to DynamoDB, stores the invoice in S3, and publishes SNS notifications.
+9. Jenkins builds the Docker image, pushes it to ECR, updates ECS, and runs smoke tests.
+
+AWS services used by this project:
+
+| Service | Why it is used |
+| --- | --- |
+| VPC, public subnets, private subnets, Internet Gateway, NAT Gateway | Network foundation for public ALB/Jenkins and private ECS/RDS/Lambda access |
+| Application Load Balancer | Public HTTP entry point for the API and UI |
+| ECS Fargate | Runs the Node.js Order API container |
+| ECR | Stores the Docker image for the Order API |
+| RDS PostgreSQL | Stores products and orders |
+| Secrets Manager | Stores generated RDS credentials |
+| SQS and DLQ | Queues orders for background processing |
+| Lambda | Processes orders asynchronously |
+| DynamoDB | Stores order audit events |
+| S3 | Stores generated invoice files |
+| SNS | Sends order notifications and operational alerts |
+| CloudFront | CDN/public frontend in front of the ALB |
+| CloudWatch | Logs, dashboard, and alarms |
+| EC2 Jenkins | CI/CD server for app deployment |
+| IAM | Roles and permissions for Jenkins, ECS, and Lambda |
+
+Important architecture notes from the current code:
+
+- The AWS region is hardcoded as `us-east-2` in several files.
+- CloudFront uses the default CloudFront certificate. There is no Route53, ACM, custom domain, or DNS setup in this project.
+- There is no Cognito setup in this project.
+- The API has optional API key middleware, but Terraform currently sets `AUTH_ENABLED=false`, so API key authentication is off by default.
+- Terraform uses an S3 backend for remote state. No DynamoDB lock table is configured for Terraform state locking.
+
+## 2. Important Note Before Starting
+
+Several values in this project are sample, demo, personal, or account-specific values. The client must replace these before deployment.
+
+The most important values to replace are:
+
+- Terraform state S3 bucket name
+- SES sender email address
+- Admin public IP CIDR for Jenkins access
+- EC2 key pair name and local PEM file path
+- GitHub repository URL
+- ECR repository URL containing the old AWS account ID
+- Jenkins default password after first login
+
+Do not deploy before updating these values. The current project contains previous account-specific values such as:
+
+- AWS account ID: `992382749898`
+- Email: `hammadmuqaddam@gmail.com`
+- GitHub repo: `https://github.com/muhammadhassan120/order-platform.git`
+- Admin CIDR: `182.189.97.243/32`
+- Terraform state bucket: `event-driven-state-key`
+- Local private key path: `D:/key-pairs/order-platform-key.pem`
+
+This guide shows exactly where each value is located and what to replace it with.
+
+## 3. Things the Client Must Prepare First
+
+Prepare these items before running Terraform.
+
+1. AWS account
+
+Use the AWS account where the project should be deployed.
+
+2. AWS IAM permissions
+
+The AWS user or role running Terraform must be allowed to create and manage the services used in this project:
+
+- VPC, subnets, route tables, Internet Gateway, NAT Gateway, Elastic IP
+- Security Groups
+- EC2 instances and EC2 key pairs
+- IAM roles, policies, and instance profiles
+- ECS, ECR, and Application Auto Scaling
+- ALB and target groups
+- RDS PostgreSQL
+- Secrets Manager
+- S3
+- SNS
+- SQS
+- Lambda
+- DynamoDB
+- CloudWatch dashboards and alarms
+- CloudFront
+
+For a beginner deployment, administrator access is the simplest path. For production, use a scoped IAM role with the services above.
+
+3. AWS CLI installed and configured
+
+Run this on the deployment machine:
+
+```bash
+aws configure
+```
+
+Use credentials for the client AWS account and set the default region to:
+
+```text
+us-east-2
+```
+
+Check the AWS account ID:
+
+```bash
+aws sts get-caller-identity
+```
+
+Copy the 12-digit `Account` value. It will be needed for the ECR URL.
+
+4. Terraform installed
+
+The project requires Terraform `>= 1.5.0`, according to `infra/versions.tf`.
+
+Check Terraform:
+
+```bash
+terraform version
+```
+
+5. Git installed
+
+Git is needed to push the project to the client's GitHub repository and for Jenkins checkout.
+
+6. GitHub repository
+
+Create a GitHub repository for this project and push the project code there. The current project references the old repository URL, so the client must replace it with their own repo URL.
+
+7. EC2 key pair
+
+Create an EC2 key pair in AWS. Terraform expects the EC2 key pair name to be:
+
+```text
+order-platform-key
+```
+
+The downloaded private key file can be named:
+
+```text
+order-platform-key.pem
+```
+
+Important: the AWS key pair name and the local `.pem` file name are not the same thing. The current Terraform code expects the AWS key pair name without `.pem`.
+
+8. Terraform state S3 bucket
+
+Create one S3 bucket manually before `terraform init`. This bucket stores Terraform remote state.
+
+The current bucket name in code is:
+
+```text
+event-driven-state-key
+```
+
+The client should replace it with a globally unique bucket name, for example:
+
+```text
+client-order-platform-tfstate-123456789012
+```
+
+Use the real client account ID or company name to make the bucket unique.
+
+9. SES verified sender email
+
+The Lambda function sends email using SES from `var.ses_from_email`. The email must be verified in SES in `us-east-2`.
+
+Current value:
+
+```text
+hammadmuqaddam@gmail.com
+```
+
+Replace it with a client-owned verified sender email.
+
+10. No domain is required
+
+This project does not include Route53, ACM, or custom domain configuration. The client can use the generated CloudFront domain name and ALB DNS name from Terraform outputs.
+
+## 4. Complete List of Values the Client Must Change
+
+### A. Must change before Terraform deployment
+
+| File | Setting | Current value | Replace with | Why |
+| --- | --- | --- | --- | --- |
+| `infra/versions.tf` | Terraform backend S3 bucket | `event-driven-state-key` | Client-owned globally unique S3 bucket name | Terraform state bucket must exist in the client's AWS account |
+| `infra/versions.tf` | Terraform backend key | `event-driven/terraform.tfstate` | Keep as-is or choose one consistent state path | This controls where Terraform stores state inside the bucket |
+| `infra/versions.tf` | Terraform backend region | `us-east-2` | Keep `us-east-2` unless updating all region references | Backend bucket region must match the created S3 bucket |
+| `jenkins/Jenkinsfile.infra` | `TF_STATE_BUCKET` | `event-driven-state-key` | Same bucket used in `infra/versions.tf` | Jenkins infra pipeline must use the same state bucket |
+| `infra/terraform.tfvars` | `ses_from_email` | `hammadmuqaddam@gmail.com` | Client SES-verified sender email | Lambda uses this as the sender email |
+| `infra/environments/dev.tfvars` | `ses_from_email` | `hammadmuqaddam@gmail.com` | Same client SES-verified sender email | Jenkins infra pipeline uses this file for `dev` |
+| `infra/security.tf` | `admin_cidr` | `182.189.97.243/32` | Client public IP with `/32` | Restricts SSH and Jenkins UI access |
+| `infra/jenkins.tf` | `key_pair_name` | `order-platform-key` | AWS EC2 key pair name | EC2 Jenkins instance cannot launch if the key pair name does not exist |
+| `infra/db-seed.tf` | SSH `private_key` path | `D:/key-pairs/order-platform-key.pem` | Actual local path to the downloaded PEM file | Terraform uses this private key to SSH into Jenkins and seed the DB |
+| `infra/jenkins.tf` | `repo_url` | `https://github.com/muhammadhassan120/order-platform.git` | Client GitHub repo URL | This is a project-specific repository value |
+| `infra/db-seed.tf` | `git clone` URL | `https://github.com/muhammadhassan120/order-platform.git` | Client GitHub repo URL | This is the URL actually used by the automatic DB seed step |
+| `jenkins/Jenkinsfile` | `ECR_REPO` | `992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo` | `<CLIENT_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo` | Jenkins must push to the client's ECR repo |
+| `jenkins/scripts/rollback.sh` | `ECR_REPO` | `992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo` | `<CLIENT_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo` | Rollback must pull images from the client's ECR repo |
+
+### B. Values to keep unless the client intentionally renames the project
+
+| File | Setting | Current value | When to change |
+| --- | --- | --- | --- |
+| `infra/ecr.tf` | ECR repository name | `order-platform-repo` | Change only if the client wants a different ECR repo name |
+| `jenkins/scripts/rollback.sh` | `--repository-name` | `order-platform-repo` | Must match `infra/ecr.tf` if renamed |
+| `infra/ecs.tf` | ECS cluster | `order-platform-cluster` | Change only if renamed everywhere Jenkins references it |
+| `infra/ecs.tf` | ECS service | `order-platform-service` | Change only if renamed everywhere Jenkins references it |
+| `infra/ecs.tf` | ECS task family | `order-platform-task` | Change only if the client wants a different task family |
+| `infra/ecs.tf` | Container name | `order-api` | Change only if Docker/ECS/Jenkins deployment script are all updated |
+| `jenkins/Jenkinsfile` | `ECS_CLUSTER` | `order-platform-cluster` | Must match `infra/ecs.tf` |
+| `jenkins/Jenkinsfile` | `ECS_SERVICE` | `order-platform-service` | Must match `infra/ecs.tf` |
+| `jenkins/Jenkinsfile` | `TASK_CONTAINER` | `order-api` | Must match `infra/ecs.tf` |
+| `jenkins/scripts/rollback.sh` | `ECS_CLUSTER`, `ECS_SERVICE`, `TASK_CONTAINER` | Same values above | Must match Terraform-created ECS resources |
+| `infra/s3 + sns .tf` | S3/SNS name prefix | `order-platform` | Change if `order-platform-invoices` bucket is already taken |
+| `infra/rds.tf` | RDS name prefix | `order-platform-latet` | Change only if the RDS identifier conflicts or the client wants a cleaner name |
+| `infra/rds.tf` | DB name | `mydb` | Change only if also updating seed and app expectations |
+| `infra/rds.tf` | DB username | `appuser` | Change only if also updating docs and seed expectations |
+| `infra/networking.tf` | VPC CIDR | `10.0.0.0/16` | Change only if this overlaps existing client networking |
+| `infra/networking.tf` | Subnet CIDRs | `10.0.1.0/24`, `10.0.2.0/24`, `10.0.11.0/24`, `10.0.12.0/24` | Change only if needed for client network planning |
+
+### C. Region-related values
+
+The project is built around `us-east-2`. Keep this region unless the client is comfortable updating every region and Availability Zone reference.
+
+Region appears in:
+
+| File | Current value |
+| --- | --- |
+| `infra/provider.tf` | `us-east-2` |
+| `infra/versions.tf` | `us-east-2` |
+| `infra/networking.tf` | `us-east-2a`, `us-east-2b` |
+| `infra/ecs.tf` | `us-east-2` |
+| `infra/monitoring.tf` | `us-east-2` |
+| `infra/db-seed.tf` | `--region us-east-2` |
+| `jenkins/Jenkinsfile` | `us-east-2` |
+| `jenkins/Jenkinsfile.infra` | `us-east-2` |
+| `jenkins/scripts/rollback.sh` | default `us-east-2` |
+| `scripts/create-jenkins-ami.sh` | default `us-east-2` |
+| `services/order-api/src/app.js` | fallback `us-east-2` |
+| `services/order-processor/handler.py` | fallback `us-east-2` |
+| `infra/module/async/lambda_build/handler.py` | fallback `us-east-2` |
+
+### D. Generated or local files with old account-specific data
+
+These are not normal files the client should edit for configuration, but they contain old environment-specific values.
+
+| File | What it contains | Client action |
+| --- | --- | --- |
+| `infra/.terraform/terraform.tfstate` | Local Terraform backend metadata with bucket `event-driven-state-key` and region `us-east-2` | After backend changes, run `terraform init -reconfigure` |
+| `infra/errored.tfstate` | Old partial state containing account ID `992382749898`, old VPC/subnet/security group IDs, and old ECR/S3 values | Do not use this file for deployment; it is a previous failed state artifact |
+| `README1.md`, `INSTRUCTION.txt`, `PLACEHOLDERS.md` | Older notes and examples with personal values and placeholders | Use `README-IMP` as the client handoff guide |
+
+### E. Values that do not exist in this project
+
+The following were checked and are not configured in the project files:
+
+- No Route53 hosted zone
+- No custom domain
+- No ACM certificate
+- No Cognito user pool
+- No OAuth callback URL
+- No frontend allowed-origin list
+- No API Gateway
+- No Terraform DynamoDB state lock table
+- No `.env` file found in the project root or source tree
+
+## 5. Step-by-Step Client Setup Guide
+
+Follow this order.
+
+### Step 1: Choose the AWS region
+
+Use:
+
+```text
+us-east-2
+```
+
+This is the safest option because the project has many hardcoded `us-east-2` references.
+
+### Step 2: Create the Terraform state S3 bucket
+
+Create a globally unique bucket in `us-east-2`.
+
+Example:
+
+```text
+client-order-platform-tfstate-123456789012
+```
+
+Do not use `event-driven-state-key` unless that bucket already belongs to the client AWS account.
+
+### Step 3: Update Terraform backend configuration
+
+Open:
+
+```text
+infra/versions.tf
+```
+
+Replace:
+
+```hcl
+bucket = "event-driven-state-key"
+```
+
+With:
+
+```hcl
+bucket = "client-order-platform-tfstate-123456789012"
+```
+
+Keep this unless intentionally changing the state path:
+
+```hcl
+key = "event-driven/terraform.tfstate"
+```
+
+Important Jenkins note:
+
+`jenkins/Jenkinsfile.infra` overrides the backend key as:
+
+```text
+${ENVIRONMENT}/terraform.tfstate
+```
+
+That means local Terraform and Jenkins may use different state object paths unless the client aligns them. For a beginner handoff, choose one deployment method first:
+
+- Local Terraform deployment: use `infra/versions.tf` as written after changing the bucket.
+- Jenkins infra deployment: also update `jenkins/Jenkinsfile.infra` and be aware it uses `dev/terraform.tfstate` or `prod/terraform.tfstate`.
+
+### Step 4: Update Jenkins infra pipeline state bucket
+
+Open:
+
+```text
+jenkins/Jenkinsfile.infra
+```
+
+Replace:
+
+```groovy
+TF_STATE_BUCKET = 'event-driven-state-key'
+```
+
+With the same bucket name used in `infra/versions.tf`.
+
+Also note:
+
+- The Jenkins infra pipeline offers `dev` and `prod`.
+- Only `infra/environments/dev.tfvars` exists in the repository.
+- If the client selects `prod`, Terraform will fail unless `infra/environments/prod.tfvars` is created.
+
+### Step 5: Create the EC2 key pair
+
+Create an EC2 key pair named:
+
+```text
+order-platform-key
+```
+
+Download the `.pem` file and save it somewhere safe.
+
+Example local path on Windows:
+
+```text
+D:/key-pairs/order-platform-key.pem
+```
+
+If the client uses a different file path, update `infra/db-seed.tf`.
+
+### Step 6: Update the local PEM file path
+
+Open:
+
+```text
+infra/db-seed.tf
+```
+
+Replace:
+
+```hcl
+private_key = file("D:/key-pairs/order-platform-key.pem")
+```
+
+With the real local path.
+
+Examples:
+
+Windows:
+
+```hcl
+private_key = file("C:/Users/Client/Downloads/order-platform-key.pem")
+```
+
+macOS or Linux:
+
+```hcl
+private_key = file("/Users/client/.ssh/order-platform-key.pem")
+```
+
+Important: `terraform validate` currently fails on this machine because Terraform cannot read `D:/key-pairs/order-platform-key.pem`. The client must use a real readable file path before running `terraform plan` or `terraform apply`.
+
+### Step 7: Update the Jenkins key pair name if needed
+
+Open:
+
+```text
+infra/jenkins.tf
+```
+
+Current value:
+
+```hcl
+key_pair_name = "order-platform-key"
+```
+
+If the AWS key pair name is different, replace this value with the exact EC2 key pair name from AWS.
+
+### Step 8: Update admin CIDR
+
+Open:
+
+```text
+infra/security.tf
+```
+
+Replace:
+
+```hcl
+admin_cidr = "182.189.97.243/32"
+```
+
+With the client's public IP address followed by `/32`.
+
+Example:
+
+```hcl
+admin_cidr = "203.0.113.10/32"
+```
+
+This controls who can access:
+
+- SSH on port `22`
+- Jenkins UI on port `8080`
+
+If this value is wrong, the client will not be able to open Jenkins or SSH into the Jenkins EC2 instance.
+
+### Step 9: Verify SES sender email
+
+The project sends email using SES from:
+
+```hcl
+ses_from_email
+```
+
+Current value in both tfvars files:
+
+```hcl
+ses_from_email = "hammadmuqaddam@gmail.com"
+```
+
+Change it in both files:
+
+```text
+infra/terraform.tfvars
+infra/environments/dev.tfvars
+```
+
+Example:
+
+```hcl
+ses_from_email = "orders@clientdomain.com"
+```
+
+The email must be verified in SES in `us-east-2`.
+
+### Step 10: Push the project to the client's GitHub repository
+
+From the project root:
+
+```bash
+git init
+git add .
+git commit -m "Initial order platform delivery"
+git branch -M main
+git remote add origin https://github.com/<client-org>/<client-repo>.git
+git push -u origin main
+```
+
+If the repository already exists locally, use the client's normal Git workflow instead.
+
+### Step 11: Update GitHub repository URLs in Terraform
+
+Open:
+
+```text
+infra/jenkins.tf
+```
+
+Replace:
+
+```hcl
+repo_url = "https://github.com/muhammadhassan120/order-platform.git"
+```
+
+With the client's GitHub repo URL.
+
+Open:
+
+```text
+infra/db-seed.tf
+```
+
+Replace:
+
+```bash
+git clone https://github.com/muhammadhassan120/order-platform.git
+```
+
+With the client's GitHub repo URL.
+
+Important: in the current code, `infra/jenkins.tf` passes `repo_url` into the Jenkins module, but `infra/module/jenkins/main.tf` does not actually use that variable. The automatic database seed in `infra/db-seed.tf` is the place where the repo is actually cloned during Terraform apply.
+
+### Step 12: Update ECR URLs in Jenkins
+
+Get the client AWS account ID:
+
+```bash
+aws sts get-caller-identity --query Account --output text
+```
+
+Open:
+
+```text
+jenkins/Jenkinsfile
+```
+
+Replace:
+
+```groovy
+ECR_REPO = '992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo'
+```
+
+With:
+
+```groovy
+ECR_REPO = '<CLIENT_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo'
+```
+
+Open:
+
+```text
+jenkins/scripts/rollback.sh
+```
+
+Replace:
+
+```bash
+: "${ECR_REPO:=992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo}"
+```
+
+With:
+
+```bash
+: "${ECR_REPO:=<CLIENT_AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo}"
+```
+
+Keep the repository name `order-platform-repo` unless it was changed in `infra/ecr.tf`.
+
+### Step 13: Run Terraform locally
+
+From the project root:
+
+```bash
+cd infra
+terraform init -reconfigure
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
+
+Terraform will create the AWS infrastructure.
+
+After apply finishes, copy these outputs:
+
+- `jenkins_public_ip`
+- `alb_dns_name`
+- `cloudfront_distribution_domain_name`
+- `invoice_bucket_name`
+- `order_queue_url`
+- `lambda_function_name`
+- `ecs_cluster_name`
+- `ecs_service_name`
+
+### Step 14: First app deployment through Jenkins
+
+Terraform creates ECR and ECS, but the Docker image must be built and pushed before the app can run correctly.
+
+Open Jenkins:
+
+```text
+http://<jenkins_public_ip>:8080
+```
+
+Login with the current hardcoded bootstrap credentials:
+
+```text
+Username: admin
+Password: Admin@12345
+```
+
+Immediately change this password after logging in.
+
+Create a Jenkins Pipeline job that points to the client GitHub repository and uses:
+
+```text
+jenkins/Jenkinsfile
+```
+
+Run the pipeline. It will:
+
+1. Check out the repo.
+2. Run Node.js tests.
+3. Build the Docker image.
+4. Push the image to ECR.
+5. Register a new ECS task definition.
+6. Update the ECS service.
+7. Run smoke tests against the ALB.
+
+### Step 15: Verify the deployed app
+
+Open:
+
+```text
+http://<alb_dns_name>/
+```
+
+Also test CloudFront:
+
+```text
+https://<cloudfront_distribution_domain_name>/
+```
+
+Use the UI to:
+
+1. Click health check.
+2. Load inventory.
+3. Create an order using product `PROD-001` or `SMOKE-001`.
+4. Check the order status by order ID.
+
+## 6. AWS Console Click-by-Click Steps
+
+### A. Create Terraform state S3 bucket
+
+1. Log in to AWS Console.
+2. Make sure the region is `us-east-2`.
+3. Search for `S3`.
+4. Open `S3`.
+5. Click `Create bucket`.
+6. Enter a globally unique bucket name, for example `client-order-platform-tfstate-123456789012`.
+7. Select region `US East (Ohio) us-east-2`.
+8. Keep `Block all public access` enabled.
+9. Keep bucket versioning optional. Versioning is recommended for state history, but the current Terraform backend does not require it.
+10. Click `Create bucket`.
+
+Do not create this bucket with the same name as the invoice bucket. It is only for Terraform state.
+
+### B. Create EC2 key pair
+
+1. Open AWS Console.
+2. Search for `EC2`.
+3. Open `EC2`.
+4. In the left menu, click `Key Pairs`.
+5. Click `Create key pair`.
+6. Enter key pair name:
+
+```text
+order-platform-key
+```
+
+7. Choose key pair type `RSA`.
+8. Choose private key file format `.pem`.
+9. Click `Create key pair`.
+10. Save the downloaded `.pem` file safely.
+11. Update `infra/db-seed.tf` with the exact local file path.
+
+### C. Verify SES sender email
+
+1. Open AWS Console.
+2. Make sure the region is `us-east-2`.
+3. Search for `SES`.
+4. Open `Amazon Simple Email Service`.
+5. Go to `Verified identities`.
+6. Click `Create identity`.
+7. Choose `Email address` unless the client wants to verify a full domain.
+8. Enter the sender email, for example `orders@clientdomain.com`.
+9. Click `Create identity`.
+10. Open the verification email in that mailbox.
+11. Click the verification link from AWS.
+12. Confirm the identity status becomes verified in SES.
+13. Put the same email in:
+
+```text
+infra/terraform.tfvars
+infra/environments/dev.tfvars
+```
+
+If the AWS account is still in the SES sandbox, AWS may also require recipient emails to be verified or require a production access request before sending to arbitrary customers.
+
+### D. Find the client's public IP for admin CIDR
+
+1. Open a browser.
+2. Search for `what is my IP`.
+3. Copy the public IPv4 address.
+4. Add `/32` to the end.
+
+Example:
+
+```text
+203.0.113.10/32
+```
+
+5. Put that value in `infra/security.tf`.
+
+### E. Open Jenkins after Terraform apply
+
+1. After Terraform finishes, copy the `jenkins_public_ip` output.
+2. Open this URL:
+
+```text
+http://<jenkins_public_ip>:8080
+```
+
+3. Login with:
+
+```text
+admin
+Admin@12345
+```
+
+4. Change the password immediately.
+5. Install needed Jenkins plugins if Jenkins asks. At minimum, the pipeline needs Git/Pipeline capability and the Workspace Cleanup step used by `cleanWs()`.
+6. Create a Pipeline job.
+7. Point it to the client GitHub repository.
+8. Set the pipeline script path to:
+
+```text
+jenkins/Jenkinsfile
+```
+
+9. Run the job.
+
+## 7. Terraform Execution Guide
+
+### Files to edit first
+
+Edit these before any Terraform command:
+
+1. `infra/versions.tf`
+2. `jenkins/Jenkinsfile.infra`
+3. `infra/terraform.tfvars`
+4. `infra/environments/dev.tfvars`
+5. `infra/security.tf`
+6. `infra/jenkins.tf`
+7. `infra/db-seed.tf`
+8. `jenkins/Jenkinsfile`
+9. `jenkins/scripts/rollback.sh`
+
+### Commands to run
+
+From project root:
+
+```bash
+cd infra
+terraform init -reconfigure
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
+
+Use this only if the client wants non-interactive apply:
+
+```bash
+terraform apply -auto-approve
+```
+
+For client handoff, interactive `terraform apply` is safer because Terraform shows the final plan and asks for confirmation.
+
+### Outputs to check
+
+After apply, run:
+
+```bash
+terraform output
+```
+
+Check that these outputs exist:
+
+- `ecs_cluster_name`
+- `ecs_service_name`
+- `ecs_task_definition_arn`
+- `alb_dns_name`
+- `cloudfront_distribution_id`
+- `cloudfront_distribution_domain_name`
+- `invoice_bucket_name`
+- `order_queue_url`
+- `lambda_function_name`
+- `jenkins_public_ip`
+
+### What Terraform creates automatically
+
+Terraform creates:
+
+- VPC and subnets
+- NAT Gateway and Internet Gateway
+- Security groups
+- IAM roles and policies
+- ECR repository
+- ECS cluster, task definition, and service
+- ALB and target group
+- RDS PostgreSQL
+- Secrets Manager secret for DB credentials
+- S3 invoice bucket
+- SNS topics
+- SQS queue and DLQ
+- DynamoDB audit table
+- Lambda package and Lambda function
+- CloudFront distribution
+- CloudWatch dashboard and alarms
+- Jenkins EC2 instance
+- Database seed attempt through `null_resource.db_seed`
+
+### Important Terraform warnings
+
+1. The local PEM file path must be readable before `terraform validate` and `terraform apply`.
+
+Current failing path on this machine:
+
+```text
+D:/key-pairs/order-platform-key.pem
+```
+
+2. The Terraform state S3 bucket must already exist before `terraform init`.
+
+Terraform will not create its own backend bucket.
+
+3. No DynamoDB lock table is configured for Terraform state.
+
+The backend block in `infra/versions.tf` has only:
+
+```hcl
+bucket = "..."
+key    = "..."
+region = "..."
+```
+
+4. The first ECS deployment may not become healthy until Jenkins builds and pushes the first Docker image to ECR.
+
+5. The automatic database seed depends on:
+
+- Jenkins EC2 being reachable through SSH
+- Correct EC2 key pair
+- Correct local PEM file path
+- Correct GitHub repository URL in `infra/db-seed.tf`
+- RDS being reachable from Jenkins
+- Jenkins IAM role having Secrets Manager access
+
+If this seed step fails, use the manual database seed fallback in the verification section.
+
+## 8. Common Mistakes to Avoid
+
+1. Creating the EC2 key pair with the wrong name
+
+Terraform expects:
+
+```text
+order-platform-key
+```
+
+The downloaded file may be named `order-platform-key.pem`, but the AWS key pair name should match `infra/jenkins.tf`.
+
+2. Forgetting to update `infra/db-seed.tf` private key path
+
+Terraform reads the file path directly. If the file does not exist or cannot be read, Terraform fails before deployment.
+
+3. Using the old Terraform state bucket
+
+Do not use `event-driven-state-key` unless it belongs to the client. S3 bucket names are globally unique.
+
+4. Using different backend state paths locally and in Jenkins
+
+Local `infra/versions.tf` uses:
+
+```text
+event-driven/terraform.tfstate
+```
+
+Jenkins infra pipeline uses:
+
+```text
+dev/terraform.tfstate
+prod/terraform.tfstate
+```
+
+Be consistent so local and Jenkins deployments do not manage separate copies of the same infrastructure.
+
+5. Selecting `prod` in Jenkins infra pipeline without creating `infra/environments/prod.tfvars`
+
+Only `infra/environments/dev.tfvars` exists.
+
+6. Leaving the old AWS account ID in Jenkins files
+
+Replace `992382749898` in:
+
+```text
+jenkins/Jenkinsfile
+jenkins/scripts/rollback.sh
+```
+
+7. Leaving the old GitHub repository URL
+
+Replace `https://github.com/muhammadhassan120/order-platform.git` in:
+
+```text
+infra/jenkins.tf
+infra/db-seed.tf
+INSTRUCTION.txt if the client uses that older note file
+```
+
+8. Forgetting to verify SES sender email
+
+The Lambda sender email must be verified in SES in `us-east-2`.
+
+9. Setting the wrong admin CIDR
+
+If `admin_cidr` is wrong, the client cannot reach Jenkins on port `8080` or SSH on port `22`.
+
+10. Assuming a custom domain exists
+
+This project does not create Route53 records or ACM certificates. Use the CloudFront domain output unless custom DNS is added later.
+
+11. Enabling authentication without setting `API_KEY`
+
+The app has API key middleware, but Terraform currently sets:
+
+```hcl
+AUTH_ENABLED = "false"
+```
+
+If the client changes this to `true`, they must also provide `API_KEY` to the ECS task environment.
+
+12. Expecting the app to work before the database is seeded
+
+Inventory and order creation need the `products` and `orders` tables from:
+
+```text
+scripts/seed-db.sql
+```
+
+13. Expecting the app to work before the Docker image exists in ECR
+
+Terraform creates the ECS service using:
+
+```text
+<ecr-repo-url>:latest
+```
+
+Jenkins must build and push the first image.
+
+14. Ignoring the Jenkins default password
+
+The Jenkins module creates:
+
+```text
+admin / Admin@12345
+```
+
+Change it immediately after first login.
+
+15. Treating `PLACEHOLDERS.md` as the current source of truth
+
+`PLACEHOLDERS.md` mentions older values such as `ARTIFACTS_S3` and `credentials('ecr-repo-url')`, but the current `jenkins/Jenkinsfile` uses a literal `ECR_REPO` and skips archive upload. Follow the current files and this `README-IMP`.
+
+## 9. Final Verification Checklist
+
+Use this checklist after setup.
+
+### AWS infrastructure
+
+- [ ] Terraform state bucket exists in `us-east-2`.
+- [ ] `infra/versions.tf` uses the client state bucket.
+- [ ] `jenkins/Jenkinsfile.infra` uses the same client state bucket.
+- [ ] EC2 key pair exists with the name in `infra/jenkins.tf`.
+- [ ] Local PEM path in `infra/db-seed.tf` is correct and readable.
+- [ ] `admin_cidr` in `infra/security.tf` matches the client's current public IP.
+- [ ] SES sender email is verified in `us-east-2`.
+- [ ] Terraform `init`, `validate`, `plan`, and `apply` complete successfully.
+- [ ] Terraform outputs include Jenkins IP, ALB DNS, and CloudFront domain.
+
+### Jenkins and CI/CD
+
+- [ ] Jenkins opens at `http://<jenkins_public_ip>:8080`.
+- [ ] Jenkins password has been changed from `Admin@12345`.
+- [ ] Jenkins Pipeline job points to the client GitHub repository.
+- [ ] Pipeline script path is `jenkins/Jenkinsfile`.
+- [ ] `jenkins/Jenkinsfile` uses the client AWS account ID in `ECR_REPO`.
+- [ ] Pipeline test stage passes.
+- [ ] Docker image is built and pushed to ECR.
+- [ ] ECS service is updated by Jenkins.
+- [ ] Smoke test stage passes.
+
+### Application
+
+- [ ] `http://<alb_dns_name>/health` returns healthy JSON.
+- [ ] `https://<cloudfront_distribution_domain_name>/` opens the UI.
+- [ ] Inventory loads in the UI.
+- [ ] Creating an order returns an order ID.
+- [ ] Order status can be checked by ID.
+- [ ] Order eventually changes from `PENDING` to `COMPLETED`.
+
+### Async processing
+
+- [ ] SQS main queue receives order messages.
+- [ ] Lambda `order-platform-order-processor` runs without errors.
+- [ ] DLQ has no unexpected messages.
+- [ ] Invoice file appears in the S3 invoice bucket.
+- [ ] Audit record appears in DynamoDB table `order-platform-audit-trail`.
+- [ ] SNS topics exist for order notifications and ops alerts.
+- [ ] CloudWatch dashboard exists.
+- [ ] CloudWatch alarms exist.
+
+### Manual database seed fallback
+
+If the automatic `db_seed` Terraform step fails, seed manually from the Jenkins EC2 instance.
+
+SSH into Jenkins:
+
+```bash
+ssh -i /path/to/order-platform-key.pem ec2-user@<jenkins_public_ip>
+```
+
+Install tools if needed:
+
+```bash
+sudo dnf install -y postgresql15 git jq awscli
+```
+
+Clone the client repo:
+
+```bash
+cd ~
+rm -rf order-platform
+git clone https://github.com/<client-org>/<client-repo>.git order-platform
+cd order-platform
+```
+
+Get the RDS endpoint from the AWS RDS Console and get the database password from AWS Secrets Manager. The secret is created by Terraform with this naming pattern:
+
+```text
+<rds-name-prefix>-db-credentials-order-processing-secret-latest
+```
+
+With the current `infra/rds.tf`, the secret name is:
+
+```text
+order-platform-latet-db-credentials-order-processing-secret-latest
+```
+
+Then run:
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require" -f scripts/seed-db.sql
+```
+
+Verify tables:
+
+```bash
+psql "host=<RDS_ENDPOINT> port=5432 dbname=mydb user=appuser password=<REAL_DB_PASSWORD> sslmode=require"
+```
+
+Inside `psql`:
+
+```sql
+\dt
+\q
+```
+
+Expected tables:
+
+```text
+products
+orders
+```
+
+## 10. Client Action Summary
+
+The client must create:
+
+- S3 bucket for Terraform state
+- EC2 key pair named `order-platform-key` or update Terraform to the chosen name
+- SES verified sender email in `us-east-2`
+- GitHub repository for this project
+- Jenkins Pipeline job after Terraform creates Jenkins
+
+The client must change:
+
+- `infra/versions.tf` backend bucket
+- `jenkins/Jenkinsfile.infra` state bucket
+- `infra/terraform.tfvars` sender email
+- `infra/environments/dev.tfvars` sender email
+- `infra/security.tf` admin CIDR
+- `infra/jenkins.tf` key pair name if different
+- `infra/jenkins.tf` GitHub repo URL
+- `infra/db-seed.tf` GitHub repo URL
+- `infra/db-seed.tf` local PEM file path
+- `jenkins/Jenkinsfile` ECR URL account ID
+- `jenkins/scripts/rollback.sh` ECR URL account ID
+- Jenkins default password after first login
+
+The client must run:
+
+```bash
+cd infra
+terraform init -reconfigure
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+```
+
+Then run the Jenkins app pipeline using:
+
+```text
+jenkins/Jenkinsfile
+```
+
+The client must verify:
+
+- Terraform outputs are present
+- Jenkins is reachable only from the admin IP
+- Jenkins pipeline builds and pushes Docker image to ECR
+- ECS service becomes healthy
+- ALB and CloudFront URLs open the app
+- Health check works
+- Inventory loads
+- Order creation works
+- Lambda processes orders
+- Invoice is stored in S3
+- Audit event is written to DynamoDB
+- DLQ stays empty during normal operation

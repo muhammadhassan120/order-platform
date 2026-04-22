@@ -42,3 +42,10 @@ SOMETHING LIKE THIS :
 only replace numbers with your actual aws account id 
 ECR_REPO       = 'YOUR-ACCOUNT-ID.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo'
 
+8) go to root folder "/order-processing"
+git init 
+then git add .
+and push to github 
+
+
+open jenkins instance ip address
