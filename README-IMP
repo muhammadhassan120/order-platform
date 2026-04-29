@@ -1021,7 +1021,6 @@ Use this checklist after setup.
 ### Jenkins and CI/CD
 
 - [ ] Jenkins opens at `http://<jenkins_public_ip>:8080`.
-- [ ] Jenkins password has been changed from `Admin@12345`.
 - [ ] Jenkins Pipeline job points to the client GitHub repository.
 - [ ] Pipeline script path is `jenkins/Jenkinsfile`.
 - [ ] `jenkins/Jenkinsfile` uses the client AWS account ID in `ECR_REPO`.
