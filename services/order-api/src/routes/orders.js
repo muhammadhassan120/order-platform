@@ -1,6 +1,88 @@
 const express = require('express');
 const { SendMessageCommand } = require('@aws-sdk/client-sqs');
 
+function toIso(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function durationMs(start, end) {
+  const startedAt = start ? new Date(start) : null;
+  const endedAt = end ? new Date(end) : null;
+
+  if (!startedAt || !endedAt) return null;
+  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(endedAt.getTime())) return null;
+
+  return Math.max(0, endedAt.getTime() - startedAt.getTime());
+}
+
+function buildOrderPipeline(order, queuedAt = null) {
+  const status = String(order.status || 'PENDING').toUpperCase();
+  const createdAt = toIso(order.created_at);
+  const processedAt = toIso(order.processed_at);
+  const isCompleted = status === 'COMPLETED';
+  const isFailed = status === 'FAILED';
+  const isProcessing = status === 'PROCESSING';
+
+  const stages = [
+    {
+      key: 'api',
+      label: 'API accepted order',
+      state: createdAt ? 'complete' : 'active',
+      timestamp: createdAt
+    },
+    {
+      key: 'rds',
+      label: 'RDS order row created',
+      state: createdAt ? 'complete' : 'waiting',
+      timestamp: createdAt
+    },
+    {
+      key: 'sqs',
+      label: 'SQS order event queued',
+      state: isFailed ? 'failed' : 'complete',
+      timestamp: queuedAt ? toIso(queuedAt) : null
+    },
+    {
+      key: 'lambda',
+      label: 'Lambda processor',
+      state: isFailed ? 'failed' : isCompleted ? 'complete' : (isProcessing || status === 'PENDING') ? 'active' : 'waiting',
+      timestamp: processedAt
+    },
+    {
+      key: 'artifacts',
+      label: 'Audit and invoice recorded',
+      state: isFailed ? 'failed' : isCompleted ? 'complete' : 'waiting',
+      timestamp: processedAt,
+      detail: order.invoice_key || order.payment_ref || null
+    }
+  ];
+
+  const completeCount = stages.filter((stage) => stage.state === 'complete').length;
+  const hasActiveStage = stages.some((stage) => stage.state === 'active');
+  const percent = isCompleted || isFailed
+    ? 100
+    : Math.min(95, Math.round((completeCount / stages.length) * 100) + (hasActiveStage ? 8 : 0));
+
+  return {
+    status,
+    percent,
+    terminal: isCompleted || isFailed,
+    processing_duration_ms: durationMs(order.created_at, order.processed_at),
+    stages
+  };
+}
+
+function withPipeline(order, queuedAt = null) {
+  return {
+    ...order,
+    pipeline: buildOrderPipeline(order, queuedAt)
+  };
+}
+
 module.exports = function createOrdersRouter({ poolPromise, sqsClient, orderQueueUrl }) {
   const router = express.Router();
 
@@ -90,10 +172,15 @@ module.exports = function createOrdersRouter({ poolPromise, sqsClient, orderQueu
         }
       }));
 
+      const queuedAt = new Date().toISOString();
+
       return res.status(201).json({
         order_id: order.id,
         status: 'PENDING',
-        total: order.total
+        total: order.total,
+        created_at: order.created_at,
+        queued_at: queuedAt,
+        pipeline: buildOrderPipeline({ ...order, status: 'PENDING' }, queuedAt)
       });
     } catch (err) {
       try {
@@ -131,7 +218,7 @@ module.exports = function createOrdersRouter({ poolPromise, sqsClient, orderQueu
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      return res.json(rows[0]);
+      return res.json(withPipeline(rows[0]));
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

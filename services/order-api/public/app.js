@@ -214,6 +214,65 @@ function animateMetricNumber(element, value, suffix = '', prefix = '') {
   requestAnimationFrame(step);
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeStatus(status) {
+  return String(status || 'PENDING').toUpperCase();
+}
+
+function isTerminalStatus(status) {
+  return ['COMPLETED', 'FAILED', 'CANCELLED', 'ERROR'].includes(normalizeStatus(status));
+}
+
+function parseTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateTime(value) {
+  const date = parseTimestamp(value);
+  if (!date) return 'None';
+  return `${date.toLocaleDateString('en-US')} ${formatClock(date)}`;
+}
+
+function formatDuration(milliseconds) {
+  const value = Math.max(0, Number(milliseconds) || 0);
+  if (value < 1000) return `${Math.round(value)}ms`;
+  if (value < 60000) return `${(value / 1000).toFixed(1)}s`;
+
+  const minutes = Math.floor(value / 60000);
+  const seconds = Math.round((value % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+function getProcessingDuration(order) {
+  if (!order) return null;
+
+  if (order.pipeline && Number.isFinite(Number(order.pipeline.processing_duration_ms))) {
+    return Number(order.pipeline.processing_duration_ms);
+  }
+
+  const createdAt = parseTimestamp(order.created_at);
+  const processedAt = parseTimestamp(order.processed_at);
+
+  if (!createdAt || !processedAt) return null;
+  return processedAt.getTime() - createdAt.getTime();
+}
+
+function stateLabel(state) {
+  const labels = {
+    active: 'Live',
+    complete: 'Done',
+    failed: 'Failed',
+    waiting: 'Waiting'
+  };
+
+  return labels[state] || state;
+}
+
 function shakeElement(element) {
   if (!element || motionQuery.matches) return;
 
@@ -302,6 +361,352 @@ const getOrderResult = document.getElementById('getOrderResult');
 const inventoryCount = document.getElementById('inventoryCount');
 const lastOrderId = document.getElementById('lastOrderId');
 const pipelineState = document.getElementById('pipelineState');
+const pipelineOverlay = document.getElementById('orderPipelineOverlay');
+const closePipelineBtn = document.getElementById('closePipelineBtn');
+const pipelineProgressBar = document.getElementById('pipelineProgressBar');
+const pipelinePercent = document.getElementById('pipelinePercent');
+const pipelineSummary = document.getElementById('pipelineSummary');
+const pipelineSteps = document.getElementById('pipelineSteps');
+const pipelineLivePayload = document.getElementById('pipelineLivePayload');
+const inlinePipelineBadge = document.getElementById('inlinePipelineBadge');
+const inlinePipelineBar = document.getElementById('inlinePipelineBar');
+const inlinePipelinePercent = document.getElementById('inlinePipelinePercent');
+const inlinePipelineSummary = document.getElementById('inlinePipelineSummary');
+
+const ORDER_TRACE_POLL_MS = 1250;
+const ORDER_TRACE_TIMEOUT_MS = 180000;
+
+let activePipelineTrace = null;
+let pipelineRunId = 0;
+let pipelineTimerId = null;
+let pipelinePollTimerId = null;
+
+function openPipelineDialog() {
+  if (!pipelineOverlay) return;
+  pipelineOverlay.classList.add('is-open');
+  pipelineOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function closePipelineDialog() {
+  if (!pipelineOverlay) return;
+  pipelineOverlay.classList.remove('is-open');
+  pipelineOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function clearPipelineTimers() {
+  if (pipelineTimerId) {
+    window.clearTimeout(pipelineTimerId);
+    pipelineTimerId = null;
+  }
+
+  if (pipelinePollTimerId) {
+    window.clearTimeout(pipelinePollTimerId);
+    pipelinePollTimerId = null;
+  }
+}
+
+function beginPipelineTrace(requestPayload) {
+  clearPipelineTimers();
+  pipelineRunId += 1;
+
+  activePipelineTrace = {
+    runId: pipelineRunId,
+    startedAt: Date.now(),
+    postStartedAt: performance.now(),
+    requestPayload,
+    createResponse: null,
+    order: null,
+    orderId: null,
+    status: 'SUBMITTING',
+    pollCount: 0,
+    lastCheckedAt: null,
+    postDurationMs: null,
+    terminal: false,
+    timedOut: false,
+    error: null,
+    lastActivityStatus: null
+  };
+
+  openPipelineDialog();
+  renderPipelineTrace(activePipelineTrace);
+  startPipelineTicker(pipelineRunId);
+
+  return pipelineRunId;
+}
+
+function startPipelineTicker(runId) {
+  if (pipelineTimerId) {
+    window.clearTimeout(pipelineTimerId);
+  }
+
+  function tick() {
+    if (!activePipelineTrace || activePipelineTrace.runId !== runId) return;
+    renderPipelineTrace(activePipelineTrace);
+
+    if (activePipelineTrace.terminal || activePipelineTrace.timedOut || activePipelineTrace.error) {
+      pipelineTimerId = null;
+      return;
+    }
+
+    pipelineTimerId = window.setTimeout(tick, 250);
+  }
+
+  tick();
+}
+
+function elapsedLabel(trace) {
+  const exactDuration = getProcessingDuration(trace.order);
+  if (exactDuration !== null && isTerminalStatus(trace.order?.status)) {
+    return formatDuration(exactDuration);
+  }
+
+  return formatDuration(Date.now() - trace.startedAt);
+}
+
+function statusForTrace(trace) {
+  if (trace.error) return 'ERROR';
+  if (trace.timedOut) return normalizeStatus(trace.order?.status || trace.status);
+  return normalizeStatus(trace.order?.status || trace.status);
+}
+
+function buildPipelineSteps(trace) {
+  const status = statusForTrace(trace);
+  const order = trace.order || {};
+  const createResponse = trace.createResponse || {};
+  const createdAt = order.created_at || createResponse.created_at;
+  const queuedAt = createResponse.queued_at;
+  const processedAt = order.processed_at;
+  const hasOrderId = Boolean(trace.orderId || order.id);
+  const failed = status === 'FAILED' || status === 'ERROR';
+  const completed = status === 'COMPLETED';
+  const processing = status === 'PROCESSING';
+
+  const postState = trace.error && !trace.createResponse ? 'failed' : trace.createResponse ? 'complete' : 'active';
+  const rdsState = failed && !hasOrderId ? 'failed' : hasOrderId ? 'complete' : 'waiting';
+  const queueState = failed && !hasOrderId ? 'failed' : trace.createResponse ? 'complete' : 'waiting';
+  const lambdaState = failed ? 'failed' : completed ? 'complete' : (processing || status === 'PENDING') ? 'active' : 'waiting';
+  const artifactState = failed ? 'failed' : completed ? 'complete' : 'waiting';
+
+  return [
+    {
+      title: 'POST /orders',
+      detail: trace.postDurationMs === null
+        ? 'Submitting order request'
+        : `API response in ${formatDuration(trace.postDurationMs)}`,
+      state: postState
+    },
+    {
+      title: 'RDS order row',
+      detail: createdAt ? `Created ${formatDateTime(createdAt)}` : 'Waiting for order id',
+      state: rdsState
+    },
+    {
+      title: 'SQS event queued',
+      detail: queuedAt ? `Queued ${formatDateTime(queuedAt)}` : 'Waiting for queue acknowledgement',
+      state: queueState
+    },
+    {
+      title: 'Lambda processor',
+      detail: completed
+        ? `Processed ${formatDateTime(processedAt)}`
+        : processing
+          ? 'Lambda is processing the order'
+          : status === 'PENDING'
+            ? 'Waiting for Lambda trigger'
+            : trace.error || 'Waiting for order status',
+      state: lambdaState
+    },
+    {
+      title: 'Invoice and audit',
+      detail: order.invoice_key || order.payment_ref || (completed ? 'Artifacts recorded' : 'Waiting for final DB update'),
+      state: artifactState
+    }
+  ];
+}
+
+function pipelinePercentFromSteps(trace, steps) {
+  if (trace.error || statusForTrace(trace) === 'FAILED') return 100;
+  if (statusForTrace(trace) === 'COMPLETED') return 100;
+
+  const completeCount = steps.filter((step) => step.state === 'complete').length;
+  const hasActive = steps.some((step) => step.state === 'active');
+  const basePercent = Math.round((completeCount / steps.length) * 100);
+  return clamp(basePercent + (hasActive ? 8 : 0), trace.createResponse ? 20 : 8, 95);
+}
+
+function renderPipelineSummary(target, trace, includeLastCheck) {
+  if (!target) return;
+
+  const status = statusForTrace(trace);
+  const summaryItems = [
+    ['Order', trace.orderId || trace.order?.id ? `#${trace.orderId || trace.order.id}` : 'Pending'],
+    ['Status', trace.timedOut ? `${status} (still live)` : status],
+    ['Elapsed', elapsedLabel(trace)]
+  ];
+
+  if (includeLastCheck) {
+    summaryItems.push(['Last check', trace.lastCheckedAt ? formatClock(new Date(trace.lastCheckedAt)) : 'None']);
+  }
+
+  target.innerHTML = summaryItems.map(([label, value]) => `
+    <div>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join('');
+}
+
+function renderPipelineSteps(steps) {
+  if (!pipelineSteps) return;
+
+  pipelineSteps.innerHTML = steps.map((step, index) => `
+    <li class="pipeline-step ${escapeHtml(step.state)}">
+      <span class="pipeline-step-marker">${index + 1}</span>
+      <span>
+        <span class="pipeline-step-title">${escapeHtml(step.title)}</span>
+        <span class="pipeline-step-detail">${escapeHtml(step.detail)}</span>
+      </span>
+      <span class="pipeline-step-state">${escapeHtml(stateLabel(step.state))}</span>
+    </li>
+  `).join('');
+}
+
+function tracePayload(trace) {
+  return {
+    request: trace.requestPayload,
+    create_response: trace.createResponse,
+    latest_order: trace.order,
+    status: statusForTrace(trace),
+    poll_count: trace.pollCount,
+    elapsed_ms: Math.round(Date.now() - trace.startedAt),
+    exact_processing_ms: getProcessingDuration(trace.order),
+    last_checked_at: trace.lastCheckedAt ? new Date(trace.lastCheckedAt).toISOString() : null,
+    last_network_error: trace.lastNetworkError || null,
+    error: trace.error
+  };
+}
+
+function renderPipelineTrace(trace) {
+  if (!trace) return;
+
+  const steps = buildPipelineSteps(trace);
+  const percent = trace.order?.pipeline?.percent ?? pipelinePercentFromSteps(trace, steps);
+  const progress = clamp(Number(percent) || 0, 0, 100);
+  const failed = trace.error || statusForTrace(trace) === 'FAILED';
+  const status = statusForTrace(trace);
+
+  [pipelineProgressBar, inlinePipelineBar].forEach((bar) => {
+    if (!bar) return;
+    bar.style.width = `${progress}%`;
+    bar.classList.toggle('failed', Boolean(failed));
+  });
+
+  if (pipelinePercent) pipelinePercent.textContent = `${Math.round(progress)}%`;
+  if (inlinePipelinePercent) inlinePipelinePercent.textContent = `${Math.round(progress)}%`;
+  if (inlinePipelineBadge) inlinePipelineBadge.textContent = trace.timedOut ? 'Still processing' : status;
+
+  renderPipelineSummary(pipelineSummary, trace, true);
+  renderPipelineSummary(inlinePipelineSummary, trace, false);
+  renderPipelineSteps(steps);
+
+  if (pipelineLivePayload) {
+    pipelineLivePayload.textContent = prettyJson(tracePayload(trace));
+  }
+}
+
+async function fetchOrderSnapshot(orderId) {
+  const response = await fetch(`/orders/${encodeURIComponent(orderId)}`);
+  const data = await safeJson(response);
+
+  return {
+    response,
+    data,
+    result: {
+      statusCode: response.status,
+      ...data
+    }
+  };
+}
+
+function recordPipelineActivity(trace, message, status) {
+  if (trace.lastActivityStatus === status) return;
+  trace.lastActivityStatus = status;
+  addActivity(message);
+}
+
+function finishPipelineButton(button) {
+  if (button) {
+    setButtonBusy(button, false);
+  }
+}
+
+function pollOrderUntilTerminal(orderId, runId, options = {}) {
+  if (pipelinePollTimerId) {
+    window.clearTimeout(pipelinePollTimerId);
+    pipelinePollTimerId = null;
+  }
+
+  async function poll() {
+    const trace = activePipelineTrace;
+    if (!trace || trace.runId !== runId) return;
+
+    if (Date.now() - trace.startedAt > ORDER_TRACE_TIMEOUT_MS) {
+      trace.timedOut = true;
+      trace.status = trace.order?.status || 'PENDING';
+      renderPipelineTrace(trace);
+      finishPipelineButton(options.busyButton);
+      addActivity(`Order #${orderId} is still processing.`);
+      return;
+    }
+
+    trace.pollCount += 1;
+    trace.lastCheckedAt = Date.now();
+    renderPipelineTrace(trace);
+
+    try {
+      const { response, data, result } = await fetchOrderSnapshot(orderId);
+
+      if (!response.ok) {
+        trace.error = data.error || `Lookup failed with HTTP ${response.status}`;
+        trace.status = 'ERROR';
+        renderResult(getOrderResult, result, 'compact');
+        renderPipelineTrace(trace);
+        finishPipelineButton(options.busyButton);
+        addActivity(`Order #${orderId} trace failed.`);
+        return;
+      }
+
+      const previousStatus = statusForTrace(trace);
+      trace.order = data;
+      trace.status = normalizeStatus(data.status);
+      trace.orderId = data.id || orderId;
+      trace.error = null;
+      renderResult(getOrderResult, result, 'compact');
+      animateMetricNumber(lastOrderId, trace.orderId, '', '#');
+      pipelineState.textContent = `Order ${trace.status}`;
+
+      if (trace.status !== previousStatus) {
+        recordPipelineActivity(trace, `Order #${orderId} is ${trace.status}.`, trace.status);
+      }
+
+      if (isTerminalStatus(trace.status)) {
+        trace.terminal = true;
+        renderPipelineTrace(trace);
+        finishPipelineButton(options.busyButton);
+        return;
+      }
+    } catch (error) {
+      trace.error = null;
+      trace.lastNetworkError = error.message;
+      recordPipelineActivity(trace, `Order #${orderId} trace retrying after network error.`, 'NETWORK_ERROR');
+    }
+
+    renderPipelineTrace(trace);
+    pipelinePollTimerId = window.setTimeout(poll, ORDER_TRACE_POLL_MS);
+  }
+
+  poll();
+}
 
 initRevealObserver();
 initSurfaceGlow();
@@ -310,6 +715,20 @@ initClock();
 
 document.querySelectorAll('.button').forEach((button) => {
   button.addEventListener('click', addRipple);
+});
+
+closePipelineBtn?.addEventListener('click', closePipelineDialog);
+
+pipelineOverlay?.addEventListener('click', (event) => {
+  if (event.target === pipelineOverlay) {
+    closePipelineDialog();
+  }
+});
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closePipelineDialog();
+  }
 });
 
 document.querySelectorAll('input').forEach((input) => {
@@ -427,11 +846,20 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
     ]
   };
 
-  setButtonBusy(submitButton, true, 'Creating');
+  setButtonBusy(submitButton, true, 'Tracing');
   pipelineState.textContent = 'Submitting order';
   addActivity(`Submitting order for ${productId}.`);
 
+  const runId = beginPipelineTrace(payload);
+  let releaseSubmitButton = true;
+
   try {
+    const trace = activePipelineTrace;
+    if (trace && trace.runId === runId) {
+      trace.postStartedAt = performance.now();
+      renderPipelineTrace(trace);
+    }
+
     const response = await fetch('/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -439,6 +867,17 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
     });
 
     const data = await safeJson(response);
+    const activeTrace = activePipelineTrace;
+
+    if (activeTrace && activeTrace.runId === runId) {
+      activeTrace.postDurationMs = performance.now() - activeTrace.postStartedAt;
+      activeTrace.createResponse = data;
+      activeTrace.status = normalizeStatus(data.status || (response.ok ? 'PENDING' : 'ERROR'));
+      activeTrace.orderId = data.order_id || data.id || null;
+      activeTrace.error = response.ok ? null : (data.error || `HTTP ${response.status}`);
+      activeTrace.lastCheckedAt = Date.now();
+    }
+
     const result = {
       statusCode: response.status,
       ...data
@@ -451,17 +890,29 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
       document.getElementById('orderId').value = data.order_id;
       pipelineState.textContent = 'Order queued';
       addActivity(`Order #${data.order_id} queued.`);
+      renderPipelineTrace(activePipelineTrace);
+      releaseSubmitButton = false;
+      pollOrderUntilTerminal(data.order_id, runId, { busyButton: submitButton });
       return;
     }
 
     pipelineState.textContent = response.ok ? 'Order response' : 'Order failed';
     addActivity(response.ok ? 'Order response received.' : 'Order request failed.');
+    renderPipelineTrace(activePipelineTrace);
   } catch (error) {
     renderResult(createOrderResult, { error: error.message });
     pipelineState.textContent = 'Order error';
+    if (activePipelineTrace && activePipelineTrace.runId === runId) {
+      activePipelineTrace.error = error.message;
+      activePipelineTrace.status = 'ERROR';
+      activePipelineTrace.postDurationMs = performance.now() - activePipelineTrace.postStartedAt;
+      renderPipelineTrace(activePipelineTrace);
+    }
     addActivity('Order request could not reach the API.');
   } finally {
-    setButtonBusy(submitButton, false);
+    if (releaseSubmitButton) {
+      setButtonBusy(submitButton, false);
+    }
   }
 });
 
@@ -501,6 +952,13 @@ document.getElementById('getOrderForm').addEventListener('submit', async (event)
     if (response.ok && data.status) {
       animateMetricNumber(lastOrderId, orderId, '', '#');
       pipelineState.textContent = `Order ${data.status}`;
+      if (activePipelineTrace && String(activePipelineTrace.orderId) === String(orderId)) {
+        activePipelineTrace.order = data;
+        activePipelineTrace.status = normalizeStatus(data.status);
+        activePipelineTrace.lastCheckedAt = Date.now();
+        activePipelineTrace.terminal = isTerminalStatus(data.status);
+        renderPipelineTrace(activePipelineTrace);
+      }
       addActivity(`Order #${orderId} is ${data.status}.`);
       return;
     }

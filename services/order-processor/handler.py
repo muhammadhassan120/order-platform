@@ -130,27 +130,28 @@ def handler(event, context):
                 current_status,
             )
 
+            if current_status == "COMPLETED":
+                logger.info("Order %s is already COMPLETED; skipping duplicate message", order_id)
+                conn.commit()
+                continue
+
+            cursor.execute(
+                """
+                UPDATE orders
+                SET status = %s
+                WHERE id = %s
+                """,
+                ("PROCESSING", order_id),
+            )
+            conn.commit()
+            logger.info("Order %s marked PROCESSING", order_id)
+
             # Use items from SQS body directly
             items = body.get("items", [])
             total = body.get("total", "0.00")
 
             payment_ref = f"PAY-{order_id}-{int(datetime.now(timezone.utc).timestamp())}"
             invoice_key = f"invoices/{order_id}/{payment_ref}.txt"
-
-            cursor.execute(
-                """
-                UPDATE orders
-                SET status = %s,
-                    payment_ref = %s,
-                    invoice_key = %s,
-                    processed_at = NOW()
-                WHERE id = %s
-                """,
-                ("COMPLETED", payment_ref, invoice_key, order_id),
-            )
-            conn.commit()
-
-            logger.info("Order %s marked COMPLETED", order_id)
 
             audit_table = dynamodb.Table(os.environ["AUDIT_TABLE"])
             audit_table.put_item(
@@ -181,6 +182,20 @@ def handler(event, context):
                 ContentType="text/plain",
             )
             logger.info("Invoice stored in S3 for order %s", order_id)
+
+            cursor.execute(
+                """
+                UPDATE orders
+                SET status = %s,
+                    payment_ref = %s,
+                    invoice_key = %s,
+                    processed_at = NOW()
+                WHERE id = %s
+                """,
+                ("COMPLETED", payment_ref, invoice_key, order_id),
+            )
+            conn.commit()
+            logger.info("Order %s marked COMPLETED", order_id)
 
             from_email = os.environ.get("SES_FROM_EMAIL", "")
             if not from_email:

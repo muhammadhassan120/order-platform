@@ -170,6 +170,38 @@
         <pre id="createOrderResult" class="result" aria-live="polite">No order created yet.</pre>
       </section>
 
+      <section id="inlinePipelinePanel" class="panel pipeline-panel reveal-card interactive-surface" aria-live="polite">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">Live Trace</p>
+            <h2>Order Pipeline</h2>
+          </div>
+          <div id="inlinePipelineBadge" class="mini-badge">Waiting</div>
+        </div>
+
+        <div class="pipeline-progress-row">
+          <div class="pipeline-progress-track" aria-hidden="true">
+            <span id="inlinePipelineBar"></span>
+          </div>
+          <strong id="inlinePipelinePercent">0%</strong>
+        </div>
+
+        <div id="inlinePipelineSummary" class="pipeline-summary">
+          <div>
+            <span>Order</span>
+            <strong>None</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>Idle</strong>
+          </div>
+          <div>
+            <span>Elapsed</span>
+            <strong>0.0s</strong>
+          </div>
+        </div>
+      </section>
+
       <section class="panel lookup-panel reveal-card interactive-surface">
         <div class="panel-header">
           <div>
@@ -250,6 +282,52 @@
         </section>
       </aside>
     </main>
+  </div>
+
+  <div id="orderPipelineOverlay" class="pipeline-overlay" aria-hidden="true">
+    <section class="pipeline-dialog interactive-surface" role="dialog" aria-modal="true" aria-labelledby="orderPipelineTitle">
+      <div class="pipeline-dialog-header">
+        <div>
+          <p class="section-kicker">Live Runtime Trace</p>
+          <h2 id="orderPipelineTitle">Order Pipeline</h2>
+        </div>
+        <button id="closePipelineBtn" class="icon-button magnetic" type="button" aria-label="Close pipeline trace">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18.3 5.71 16.89 4.3 12 9.17 7.11 4.3 5.7 5.71 10.59 10.6 5.7 15.49l1.41 1.41L12 12.01l4.89 4.89 1.41-1.41-4.89-4.89 4.89-4.89z" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="pipeline-progress-row">
+        <div class="pipeline-progress-track" aria-hidden="true">
+          <span id="pipelineProgressBar"></span>
+        </div>
+        <strong id="pipelinePercent">0%</strong>
+      </div>
+
+      <div id="pipelineSummary" class="pipeline-summary">
+        <div>
+          <span>Order</span>
+          <strong>None</strong>
+        </div>
+        <div>
+          <span>Status</span>
+          <strong>Idle</strong>
+        </div>
+        <div>
+          <span>Elapsed</span>
+          <strong>0.0s</strong>
+        </div>
+        <div>
+          <span>Last check</span>
+          <strong>None</strong>
+        </div>
+      </div>
+
+      <ol id="pipelineSteps" class="pipeline-steps"></ol>
+
+      <pre id="pipelineLivePayload" class="pipeline-payload">No live order data yet.</pre>
+    </section>
   </div>
 
   <script src="/app.js"></script>
