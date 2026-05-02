@@ -11,8 +11,10 @@
     "test:coverage": "jest --coverage --runInBand"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.621.0",
-    "@aws-sdk/client-sqs": "^3.621.0",
+    "@aws-sdk/client-s3": "^3.1041.0",
+    "@aws-sdk/client-secrets-manager": "^3.1041.0",
+    "@aws-sdk/client-sqs": "^3.1041.0",
+    "@aws-sdk/s3-request-presigner": "^3.1041.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "pg": "^8.12.0"

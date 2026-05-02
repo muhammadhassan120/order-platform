@@ -1,5 +1,9 @@
 const express = require('express');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { SendMessageCommand } = require('@aws-sdk/client-sqs');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+const INVOICE_URL_EXPIRES_IN_SECONDS = 300;
 
 function toIso(value) {
   if (!value) return null;
@@ -83,7 +87,40 @@ function withPipeline(order, queuedAt = null) {
   };
 }
 
-module.exports = function createOrdersRouter({ poolPromise, sqsClient, orderQueueUrl }) {
+function buildInvoiceFileName(orderId, invoiceKey) {
+  const extension = invoiceKey.split('.').pop() || 'txt';
+  return `order-${orderId}-invoice.${extension}`;
+}
+
+function isValidInvoiceKey(invoiceKey) {
+  return typeof invoiceKey === 'string' &&
+    invoiceKey.startsWith('invoices/') &&
+    !invoiceKey.includes('..') &&
+    !invoiceKey.includes('\\');
+}
+
+async function findOrder(poolPromise, orderId) {
+  const pool = await poolPromise();
+  const { rows } = await pool.query(
+    `
+    SELECT id, customer_email, items, total, status, created_at, processed_at, payment_ref, invoice_key
+    FROM orders
+    WHERE id = $1
+    `,
+    [orderId]
+  );
+
+  return rows[0] || null;
+}
+
+module.exports = function createOrdersRouter({
+  poolPromise,
+  sqsClient,
+  orderQueueUrl,
+  s3Client,
+  invoiceBucket,
+  getSignedUrlFn = getSignedUrl
+}) {
   const router = express.Router();
 
   router.post('/', async (req, res) => {
@@ -202,23 +239,60 @@ module.exports = function createOrdersRouter({ poolPromise, sqsClient, orderQueu
     }
   });
 
-  router.get('/:id', async (req, res) => {
+  router.get('/:id/invoice', async (req, res) => {
     try {
-      const pool = await poolPromise();
-      const { rows } = await pool.query(
-        `
-        SELECT id, customer_email, items, total, status, created_at, processed_at, payment_ref, invoice_key
-        FROM orders
-        WHERE id = $1
-        `,
-        [req.params.id]
-      );
+      if (!invoiceBucket) {
+        return res.status(500).json({ error: 'INVOICE_BUCKET is not configured' });
+      }
 
-      if (!rows.length) {
+      if (!s3Client) {
+        return res.status(500).json({ error: 'S3 client is not configured' });
+      }
+
+      const order = await findOrder(poolPromise, req.params.id);
+
+      if (!order) {
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      return res.json(withPipeline(rows[0]));
+      if (String(order.status).toUpperCase() !== 'COMPLETED') {
+        return res.status(409).json({ error: 'Invoice is available after order completion' });
+      }
+
+      if (!isValidInvoiceKey(order.invoice_key)) {
+        return res.status(404).json({ error: 'Invoice file is not available for this order' });
+      }
+
+      const command = new GetObjectCommand({
+        Bucket: invoiceBucket,
+        Key: order.invoice_key,
+        ResponseContentDisposition: `attachment; filename="${buildInvoiceFileName(order.id, order.invoice_key)}"`,
+        ResponseContentType: 'text/plain'
+      });
+      const invoiceUrl = await getSignedUrlFn(s3Client, command, {
+        expiresIn: INVOICE_URL_EXPIRES_IN_SECONDS
+      });
+
+      return res.json({
+        order_id: order.id,
+        invoice_key: order.invoice_key,
+        expires_in: INVOICE_URL_EXPIRES_IN_SECONDS,
+        invoice_url: invoiceUrl
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/:id', async (req, res) => {
+    try {
+      const order = await findOrder(poolPromise, req.params.id);
+
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      return res.json(withPipeline(order));
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

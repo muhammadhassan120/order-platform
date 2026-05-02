@@ -11,24 +11,25 @@ function buildApp(router) {
 }
 
 describe('orders route', () => {
+  function completedOrder(overrides = {}) {
+    return {
+      id: 42,
+      customer_email: 'customer@example.com',
+      items: [{ product_id: 'SMOKE-001', qty: 1 }],
+      total: '0.01',
+      status: 'COMPLETED',
+      created_at: new Date('2026-05-02T06:00:00.000Z'),
+      processed_at: new Date('2026-05-02T06:00:04.250Z'),
+      payment_ref: 'PAY-42',
+      invoice_key: 'invoices/42/PAY-42.txt',
+      ...overrides
+    };
+  }
+
   test('GET /orders/:id returns live pipeline metadata', async () => {
-    const createdAt = new Date('2026-05-02T06:00:00.000Z');
-    const processedAt = new Date('2026-05-02T06:00:04.250Z');
     const pool = {
       query: jest.fn().mockResolvedValue({
-        rows: [
-          {
-            id: 42,
-            customer_email: 'customer@example.com',
-            items: [{ product_id: 'SMOKE-001', qty: 1 }],
-            total: '0.01',
-            status: 'COMPLETED',
-            created_at: createdAt,
-            processed_at: processedAt,
-            payment_ref: 'PAY-42',
-            invoice_key: 'invoices/42/PAY-42.txt'
-          }
-        ]
+        rows: [completedOrder()]
       })
     };
 
@@ -54,6 +55,64 @@ describe('orders route', () => {
       'lambda',
       'artifacts'
     ]);
+  });
+
+  test('GET /orders/:id/invoice returns a pre-signed invoice URL for completed orders', async () => {
+    const pool = {
+      query: jest.fn().mockResolvedValue({
+        rows: [completedOrder()]
+      })
+    };
+    const getSignedUrlFn = jest.fn().mockResolvedValue('https://signed.example/invoice.txt');
+    const app = buildApp(createOrdersRouter({
+      poolPromise: async () => pool,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: 'queue-url',
+      s3Client: {},
+      invoiceBucket: 'order-platform-invoices',
+      getSignedUrlFn
+    }));
+
+    const response = await request(app).get('/orders/42/invoice');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      order_id: 42,
+      invoice_key: 'invoices/42/PAY-42.txt',
+      expires_in: 300,
+      invoice_url: 'https://signed.example/invoice.txt'
+    });
+    expect(getSignedUrlFn).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Bucket: 'order-platform-invoices',
+          Key: 'invoices/42/PAY-42.txt',
+          ResponseContentDisposition: 'attachment; filename="order-42-invoice.txt"'
+        })
+      }),
+      { expiresIn: 300 }
+    );
+  });
+
+  test('GET /orders/:id/invoice blocks invoices until processing is complete', async () => {
+    const pool = {
+      query: jest.fn().mockResolvedValue({
+        rows: [completedOrder({ status: 'PROCESSING', processed_at: null, invoice_key: null })]
+      })
+    };
+    const app = buildApp(createOrdersRouter({
+      poolPromise: async () => pool,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: 'queue-url',
+      s3Client: {},
+      invoiceBucket: 'order-platform-invoices'
+    }));
+
+    const response = await request(app).get('/orders/42/invoice');
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('Invoice is available after order completion');
   });
 
   test('POST /orders returns queue timing and pending pipeline metadata', async () => {

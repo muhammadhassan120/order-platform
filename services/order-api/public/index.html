@@ -44,32 +44,6 @@
       </div>
     </header>
 
-    <section class="hero-panel reveal-card interactive-surface">
-      <div class="hero-copy">
-        <p class="section-kicker">Dark luxury command center</p>
-        <h2>Operate the order pipeline with boardroom-grade clarity.</h2>
-        <p class="hero-text">
-          Monitor inventory, submit orders, and trace async processing from one precise surface.
-        </p>
-      </div>
-
-      <div class="hero-console" aria-label="Current deployment flow">
-        <div class="console-header">
-          <span></span>
-          <span></span>
-          <span></span>
-          <strong>pipeline.live</strong>
-        </div>
-        <div class="hero-signal">
-          <span>CloudFront</span>
-          <span>ALB</span>
-          <span>ECS</span>
-          <span>SQS</span>
-          <span>Lambda</span>
-        </div>
-      </div>
-    </section>
-
     <section class="metric-grid" aria-label="Platform status">
       <article class="metric-tile reveal-card interactive-surface">
         <span class="metric-label">Service</span>
@@ -225,6 +199,15 @@
         </form>
 
         <pre id="getOrderResult" class="result compact" aria-live="polite">No order fetched yet.</pre>
+        <div id="invoiceActions" class="invoice-actions is-hidden" aria-live="polite">
+          <a id="invoiceDownloadLink" class="button primary magnetic" href="#" target="_blank" rel="noopener noreferrer">
+            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
+            </svg>
+            <span>Download Invoice</span>
+          </a>
+          <span id="invoiceDownloadMeta">Available after completion.</span>
+        </div>
       </section>
 
       <aside class="side-stack">
@@ -248,21 +231,6 @@
               <span class="interactive-surface">DynamoDB</span>
               <span class="interactive-surface">SNS</span>
             </div>
-          </div>
-        </section>
-
-        <section class="panel endpoint-panel reveal-card interactive-surface">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">API</p>
-              <h2>Endpoints</h2>
-            </div>
-          </div>
-          <div class="endpoint-list">
-            <div class="interactive-surface"><span>GET</span><code>/health</code></div>
-            <div class="interactive-surface"><span>GET</span><code>/inventory</code></div>
-            <div class="interactive-surface"><span>POST</span><code>/orders</code></div>
-            <div class="interactive-surface"><span>GET</span><code>/orders/:id</code></div>
           </div>
         </section>
 

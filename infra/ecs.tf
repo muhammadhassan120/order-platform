@@ -41,6 +41,10 @@ module "ecs" {
     {
       name  = "DB_SECRET_ARN"
       value = module.rds.db_secret_arn
+    },
+    {
+      name  = "INVOICE_BUCKET"
+      value = module.s3.invoice_bucket_name
     }
   ]
 

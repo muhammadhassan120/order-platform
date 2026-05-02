@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
 const { Pool } = require('pg');
+const { S3Client } = require('@aws-sdk/client-s3');
 const { SQSClient } = require('@aws-sdk/client-sqs');
 const {
   SecretsManagerClient,
@@ -22,9 +23,11 @@ const port = process.env.PORT || 3000;
 const region = process.env.AWS_REGION || 'us-east-2';
 const orderQueueUrl = process.env.ORDER_QUEUE_URL;
 const dbSecretArn = process.env.DB_SECRET_ARN;
+const invoiceBucket = process.env.INVOICE_BUCKET;
 
 const secretsClient = new SecretsManagerClient({ region });
 const sqsClient = new SQSClient({ region });
+const s3Client = new S3Client({ region });
 
 let pool;
 
@@ -62,7 +65,9 @@ app.use('/inventory', auth, createInventoryRouter({ poolPromise }));
 app.use('/orders', auth, createOrdersRouter({
   poolPromise,
   sqsClient,
-  orderQueueUrl
+  orderQueueUrl,
+  s3Client,
+  invoiceBucket
 }));
 
 app.get('/', (req, res) => {

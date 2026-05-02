@@ -361,6 +361,9 @@ const getOrderResult = document.getElementById('getOrderResult');
 const inventoryCount = document.getElementById('inventoryCount');
 const lastOrderId = document.getElementById('lastOrderId');
 const pipelineState = document.getElementById('pipelineState');
+const invoiceActions = document.getElementById('invoiceActions');
+const invoiceDownloadLink = document.getElementById('invoiceDownloadLink');
+const invoiceDownloadMeta = document.getElementById('invoiceDownloadMeta');
 const pipelineOverlay = document.getElementById('orderPipelineOverlay');
 const closePipelineBtn = document.getElementById('closePipelineBtn');
 const pipelineProgressBar = document.getElementById('pipelineProgressBar');
@@ -380,6 +383,90 @@ let activePipelineTrace = null;
 let pipelineRunId = 0;
 let pipelineTimerId = null;
 let pipelinePollTimerId = null;
+let invoiceDownloadOrderId = null;
+
+function resetInvoiceDownload(message = 'Available after completion.') {
+  invoiceDownloadOrderId = null;
+
+  if (invoiceActions) {
+    invoiceActions.classList.add('is-hidden');
+  }
+
+  if (invoiceDownloadLink) {
+    invoiceDownloadLink.href = '#';
+    invoiceDownloadLink.setAttribute('aria-disabled', 'true');
+  }
+
+  if (invoiceDownloadMeta) {
+    invoiceDownloadMeta.textContent = message;
+  }
+}
+
+function setInvoiceDownloadPending(message) {
+  if (invoiceActions) {
+    invoiceActions.classList.remove('is-hidden');
+  }
+
+  if (invoiceDownloadLink) {
+    invoiceDownloadLink.href = '#';
+    invoiceDownloadLink.setAttribute('aria-disabled', 'true');
+  }
+
+  if (invoiceDownloadMeta) {
+    invoiceDownloadMeta.textContent = message;
+  }
+}
+
+function showInvoiceDownload(orderId, invoiceData) {
+  invoiceDownloadOrderId = String(orderId);
+
+  if (invoiceActions) {
+    invoiceActions.classList.remove('is-hidden');
+  }
+
+  if (invoiceDownloadLink) {
+    invoiceDownloadLink.href = invoiceData.invoice_url;
+    invoiceDownloadLink.removeAttribute('aria-disabled');
+  }
+
+  if (invoiceDownloadMeta) {
+    const minutes = Math.max(1, Math.round((invoiceData.expires_in || 300) / 60));
+    invoiceDownloadMeta.textContent = `Pre-signed S3 link expires in ${minutes} minutes.`;
+  }
+}
+
+async function loadInvoiceDownload(orderId) {
+  if (!orderId) return;
+  if (invoiceDownloadOrderId === String(orderId)) return;
+
+  setInvoiceDownloadPending('Preparing secure S3 invoice link...');
+
+  try {
+    const response = await fetch(`/orders/${encodeURIComponent(orderId)}/invoice`);
+    const data = await safeJson(response);
+
+    if (!response.ok || !data.invoice_url) {
+      setInvoiceDownloadPending(data.error || 'Invoice link is not available yet.');
+      addActivity(`Invoice link for order #${orderId} is not ready.`);
+      return;
+    }
+
+    showInvoiceDownload(orderId, data);
+    addActivity(`Invoice link ready for order #${orderId}.`);
+  } catch (error) {
+    setInvoiceDownloadPending(`Invoice link error: ${error.message}`);
+    addActivity(`Invoice link for order #${orderId} could not be created.`);
+  }
+}
+
+function updateInvoiceDownloadForOrder(order) {
+  if (normalizeStatus(order?.status) === 'COMPLETED' && order?.invoice_key) {
+    loadInvoiceDownload(order.id);
+    return;
+  }
+
+  resetInvoiceDownload('Available after completion.');
+}
 
 function openPipelineDialog() {
   if (!pipelineOverlay) return;
@@ -692,6 +779,7 @@ function pollOrderUntilTerminal(orderId, runId, options = {}) {
       if (isTerminalStatus(trace.status)) {
         trace.terminal = true;
         renderPipelineTrace(trace);
+        updateInvoiceDownloadForOrder(data);
         finishPipelineButton(options.busyButton);
         return;
       }
@@ -708,6 +796,7 @@ function pollOrderUntilTerminal(orderId, runId, options = {}) {
   poll();
 }
 
+resetInvoiceDownload();
 initRevealObserver();
 initSurfaceGlow();
 initCursorGlow();
@@ -718,6 +807,12 @@ document.querySelectorAll('.button').forEach((button) => {
 });
 
 closePipelineBtn?.addEventListener('click', closePipelineDialog);
+
+invoiceDownloadLink?.addEventListener('click', (event) => {
+  if (invoiceDownloadLink.getAttribute('aria-disabled') === 'true') {
+    event.preventDefault();
+  }
+});
 
 pipelineOverlay?.addEventListener('click', (event) => {
   if (event.target === pipelineOverlay) {
@@ -846,6 +941,7 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
     ]
   };
 
+  resetInvoiceDownload('Available after completion.');
   setButtonBusy(submitButton, true, 'Tracing');
   pipelineState.textContent = 'Submitting order';
   addActivity(`Submitting order for ${productId}.`);
@@ -918,6 +1014,7 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
 
 document.getElementById('orderFormReset').addEventListener('click', () => {
   createOrderResult.textContent = 'No order created yet.';
+  resetInvoiceDownload('Available after completion.');
   addActivity('Order form reset.');
 });
 
@@ -937,6 +1034,7 @@ document.getElementById('getOrderForm').addEventListener('submit', async (event)
 
   setButtonBusy(submitButton, true, 'Fetching');
   pipelineState.textContent = 'Checking order';
+  resetInvoiceDownload('Checking invoice availability...');
   addActivity(`Looking up order #${orderId}.`);
 
   try {
@@ -959,6 +1057,7 @@ document.getElementById('getOrderForm').addEventListener('submit', async (event)
         activePipelineTrace.terminal = isTerminalStatus(data.status);
         renderPipelineTrace(activePipelineTrace);
       }
+      updateInvoiceDownloadForOrder(data);
       addActivity(`Order #${orderId} is ${data.status}.`);
       return;
     }
