@@ -26,11 +26,41 @@ resource "aws_instance" "jenkins" {
     echo "===== START JENKINS SETUP ====="
     sleep 20
 
-    dnf clean all
-    dnf makecache
-    dnf update -y
+    retry() {
+      local tries="$1"
+      shift
+      local delay=10
+      local attempt=1
 
-    dnf install -y \
+      until "$@"; do
+        if [ "$attempt" -ge "$tries" ]; then
+          echo "Command failed after $attempt attempts: $*" >&2
+          return 1
+        fi
+
+        echo "Attempt $attempt failed: $*" >&2
+        dnf clean all || true
+        rm -rf /var/cache/dnf/* || true
+        sleep "$delay"
+        attempt=$((attempt + 1))
+      done
+    }
+
+    refresh_dnf_cache() {
+      dnf clean all || true
+      rm -rf /var/cache/dnf/* || true
+      retry 5 dnf makecache --refresh
+    }
+
+    dnf_install() {
+      refresh_dnf_cache
+      retry 5 dnf install -y "$@"
+    }
+
+    refresh_dnf_cache
+    retry 5 dnf update -y
+
+    dnf_install \
       git \
       docker \
       jq \
@@ -39,13 +69,14 @@ resource "aws_instance" "jenkins" {
       tar \
       postgresql15 \
       awscli \
-      nodejs \
       java-21-amazon-corretto
+
+    dnf_install nodejs || echo "Node.js install failed; continuing because Jenkins does not require it to start"
 
     alternatives --set java /usr/lib/jvm/java-21-amazon-corretto.x86_64/bin/java
 
     java -version
-    node -v
+    node -v || true
     git --version
     docker --version
     psql --version
@@ -56,62 +87,14 @@ resource "aws_instance" "jenkins" {
     usermod -aG docker ec2-user
 
     wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/rpm-stable/jenkins.repo
-    rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key || true
+    rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    sed -i 's/^repo_gpgcheck=.*/repo_gpgcheck=0/' /etc/yum.repos.d/jenkins.repo
 
-    dnf clean all
-    dnf makecache
-    dnf install -y jenkins
+    dnf_install jenkins
 
     usermod -aG docker jenkins
 
-    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
-
-    PUBLIC_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" \
-      -s http://169.254.169.254/latest/meta-data/public-ipv4)
-
-    PUBLIC_JENKINS_URL="http://$PUBLIC_IP:8080"
     LOCAL_JENKINS_URL="http://127.0.0.1:8080"
-
-    mkdir -p /var/lib/jenkins/init.groovy.d
-
-    cat > /var/lib/jenkins/init.groovy.d/01-security.groovy <<'GROOVY'
-    import jenkins.model.*
-    import hudson.security.*
-    import jenkins.install.InstallState
-
-    def instance = Jenkins.get()
-
-    def hudsonRealm = new HudsonPrivateSecurityRealm(false)
-    if (hudsonRealm.getUser("admin") == null) {
-      hudsonRealm.createAccount("admin", "Admin@12345")
-    }
-
-    instance.setSecurityRealm(hudsonRealm)
-
-    def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
-    strategy.setAllowAnonymousRead(false)
-    instance.setAuthorizationStrategy(strategy)
-
-    instance.setInstallState(InstallState.INITIAL_SETUP_COMPLETED)
-    instance.save()
-    GROOVY
-
-    cat > /var/lib/jenkins/init.groovy.d/02-location.groovy <<GROOVY
-    import jenkins.model.*
-
-    def jlc = JenkinsLocationConfiguration.get()
-    jlc.setUrl("$${PUBLIC_JENKINS_URL}/")
-    jlc.save()
-    GROOVY
-
-    chown -R jenkins:jenkins /var/lib/jenkins/init.groovy.d
-
-    mkdir -p /etc/systemd/system/jenkins.service.d
-    cat > /etc/systemd/system/jenkins.service.d/override.conf <<'SYSTEMD'
-    [Service]
-    Environment="JAVA_OPTS=-Djava.awt.headless=true"
-    SYSTEMD
 
     systemctl daemon-reload
     systemctl enable jenkins
@@ -125,7 +108,16 @@ resource "aws_instance" "jenkins" {
       sleep 5
     done
 
-    curl -fsS -u admin:Admin@12345 "$LOCAL_JENKINS_URL/me/api/json" >/dev/null
+    for i in {1..120}; do
+      if [ -f /var/lib/jenkins/secrets/initialAdminPassword ]; then
+        echo "Jenkins setup wizard is ready"
+        break
+      fi
+      sleep 2
+    done
+
+    echo "Jenkins initial admin password:"
+    cat /var/lib/jenkins/secrets/initialAdminPassword
 
     echo "===== JENKINS SETUP COMPLETE ====="
   EOF

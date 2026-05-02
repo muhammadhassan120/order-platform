@@ -37,7 +37,7 @@ resource "aws_secretsmanager_secret" "db_password" {
   recovery_window_in_days = 0
 
   tags = {
-    Name = "${var.name_prefix}-db-credentials-order-processing"
+    Name = "${var.name_prefix}-db-credentials-order-processing-secret-latest-app"
   }
 }
 
