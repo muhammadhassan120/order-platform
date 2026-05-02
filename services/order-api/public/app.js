@@ -1,5 +1,5 @@
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-const finePointerQuery = window.matchMedia('(pointer: fine)');
+const PIPELINE_TICK_MS = 1000;
 
 function prettyJson(data) {
   return JSON.stringify(data, null, 2);
@@ -77,7 +77,7 @@ function renderResult(target, payload, state = 'default') {
   target.textContent = prettyJson(payload);
   target.className = `result ${state === 'compact' ? 'compact' : ''}`.trim();
 
-  if (!target.animate || motionQuery.matches) return;
+  if (!target.animate || motionQuery.matches || state === 'compact') return;
 
   target.animate(
     [
@@ -149,8 +149,8 @@ function renderInventoryRows(items) {
     return;
   }
 
-  tableBody.innerHTML = items.map((item, index) => `
-    <tr data-product-id="${escapeHtml(item.id)}" tabindex="0" style="--row-index:${index}">
+  tableBody.innerHTML = items.map((item) => `
+    <tr data-product-id="${escapeHtml(item.id)}" tabindex="0">
       <td><span class="mono">${escapeHtml(item.id)}</span></td>
       <td>${escapeHtml(item.name)}</td>
       <td>${formatCurrency(item.price)}</td>
@@ -188,13 +188,21 @@ function animateMetricNumber(element, value, suffix = '', prefix = '') {
   const target = Number(value);
   if (!element || Number.isNaN(target)) return;
 
+  const metricKey = `${prefix}${target}${suffix}`;
+  if (element.dataset.metricKey === metricKey) {
+    element.textContent = metricKey;
+    return;
+  }
+
+  element.dataset.metricKey = metricKey;
+
   if (motionQuery.matches) {
-    element.textContent = `${prefix}${target}${suffix}`;
+    element.textContent = metricKey;
     return;
   }
 
   const start = 0;
-  const duration = 1200;
+  const duration = 520;
   const startTime = performance.now();
 
   function easeOutCubic(progress) {
@@ -304,42 +312,6 @@ function initRevealObserver() {
   }, { threshold: 0.1 });
 
   targets.forEach((target) => observer.observe(target));
-}
-
-function initSurfaceGlow() {
-  if (!finePointerQuery.matches) return;
-
-  document.querySelectorAll('.interactive-surface').forEach((surface) => {
-    surface.addEventListener('pointermove', (event) => {
-      const rect = surface.getBoundingClientRect();
-      surface.style.setProperty('--x', `${event.clientX - rect.left}px`);
-      surface.style.setProperty('--y', `${event.clientY - rect.top}px`);
-    });
-  });
-}
-
-function initCursorGlow() {
-  const glow = document.querySelector('.cursor-glow');
-  if (!glow || !finePointerQuery.matches || motionQuery.matches) return;
-
-  let pointerX = window.innerWidth / 2;
-  let pointerY = window.innerHeight / 2;
-  let glowX = pointerX;
-  let glowY = pointerY;
-
-  window.addEventListener('pointermove', (event) => {
-    pointerX = event.clientX;
-    pointerY = event.clientY;
-  }, { passive: true });
-
-  function updateGlow() {
-    glowX += (pointerX - glowX) * 0.18;
-    glowY += (pointerY - glowY) * 0.18;
-    glow.style.transform = `translate3d(${glowX}px, ${glowY}px, 0) translate3d(-50%, -50%, 0)`;
-    requestAnimationFrame(updateGlow);
-  }
-
-  updateGlow();
 }
 
 function initClock() {
@@ -528,14 +500,17 @@ function startPipelineTicker(runId) {
 
   function tick() {
     if (!activePipelineTrace || activePipelineTrace.runId !== runId) return;
-    renderPipelineTrace(activePipelineTrace);
+    renderPipelineTrace(activePipelineTrace, {
+      skipPayload: true,
+      skipSteps: true
+    });
 
     if (activePipelineTrace.terminal || activePipelineTrace.timedOut || activePipelineTrace.error) {
       pipelineTimerId = null;
       return;
     }
 
-    pipelineTimerId = window.setTimeout(tick, 250);
+    pipelineTimerId = window.setTimeout(tick, PIPELINE_TICK_MS);
   }
 
   tick();
@@ -673,7 +648,7 @@ function tracePayload(trace) {
   };
 }
 
-function renderPipelineTrace(trace) {
+function renderPipelineTrace(trace, options = {}) {
   if (!trace) return;
 
   const steps = buildPipelineSteps(trace);
@@ -694,9 +669,11 @@ function renderPipelineTrace(trace) {
 
   renderPipelineSummary(pipelineSummary, trace, true);
   renderPipelineSummary(inlinePipelineSummary, trace, false);
-  renderPipelineSteps(steps);
+  if (!options.skipSteps) {
+    renderPipelineSteps(steps);
+  }
 
-  if (pipelineLivePayload) {
+  if (pipelineLivePayload && !options.skipPayload) {
     pipelineLivePayload.textContent = prettyJson(tracePayload(trace));
   }
 }
@@ -798,8 +775,6 @@ function pollOrderUntilTerminal(orderId, runId, options = {}) {
 
 resetInvoiceDownload();
 initRevealObserver();
-initSurfaceGlow();
-initCursorGlow();
 initClock();
 
 document.querySelectorAll('.button').forEach((button) => {

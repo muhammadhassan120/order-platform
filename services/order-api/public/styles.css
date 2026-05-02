@@ -119,17 +119,13 @@ button {
 }
 
 .noise-layer,
-.ambient-grid,
-.cursor-glow {
+.ambient-grid {
   position: fixed;
   pointer-events: none;
 }
 
 .noise-layer {
-  inset: 0;
-  z-index: -3;
-  opacity: 0.045;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.75'/%3E%3C/svg%3E");
+  display: none;
 }
 
 .ambient-grid {
@@ -139,21 +135,7 @@ button {
     linear-gradient(rgba(248, 241, 227, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(248, 241, 227, 0.035) 1px, transparent 1px);
   background-size: 64px 64px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.45) 42%, transparent 86%);
-}
-
-.cursor-glow {
-  left: 0;
-  top: 0;
-  z-index: -1;
-  width: 360px;
-  height: 360px;
-  border-radius: var(--radius-full);
-  background: radial-gradient(circle, rgba(214, 179, 106, 0.18), rgba(214, 179, 106, 0.055) 35%, transparent 68%);
-  mix-blend-mode: screen;
-  opacity: 0.95;
-  transform: translate3d(-50%, -50%, 0);
-  will-change: transform;
+  opacity: 0.72;
 }
 
 .app-shell {
@@ -175,10 +157,8 @@ button {
   padding: var(--space-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background: rgba(7, 7, 6, 0.82);
+  background: rgba(7, 7, 6, 0.96);
   box-shadow: var(--shadow-md);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
 
 .brand {
@@ -297,7 +277,6 @@ h2 {
 
 .runtime-dot {
   color: var(--accent-primary);
-  animation: breathe 1.8s var(--ease-in-out) infinite;
 }
 
 .button {
@@ -327,7 +306,6 @@ h2 {
     background 150ms var(--ease-snappy),
     color 150ms var(--ease-snappy),
     box-shadow 220ms var(--ease-out);
-  will-change: transform;
 }
 
 .button:hover {
@@ -454,8 +432,6 @@ tbody tr:focus-visible {
     linear-gradient(135deg, rgba(255, 255, 255, 0.078), rgba(255, 255, 255, 0.024)),
     var(--surface-glass);
   box-shadow: var(--shadow-xl), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
   overflow: hidden;
 }
 
@@ -592,27 +568,17 @@ tbody tr:focus-visible {
   box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   overflow: hidden;
   transition:
-    transform 260ms var(--ease-out),
     border-color 180ms var(--ease-snappy),
     box-shadow 260ms var(--ease-out),
     background 220ms var(--ease-out);
-  will-change: transform;
 }
 
 .interactive-surface::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  background: radial-gradient(420px circle at var(--x, 50%) var(--y, 50%), rgba(214, 179, 106, 0.16), transparent 42%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 400ms var(--ease-out);
+  content: none;
 }
 
 .interactive-surface:hover::before {
-  opacity: 1;
+  opacity: 0;
 }
 
 .metric-tile > *,
@@ -634,7 +600,6 @@ tbody tr:focus-visible {
 .metric-tile:hover,
 .panel:hover,
 .hero-panel:hover {
-  transform: translate3d(0, -2px, 0);
   border-color: var(--accent-line);
   box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
@@ -778,12 +743,9 @@ th {
 tbody tr {
   cursor: pointer;
   background: var(--surface-row);
-  animation: tableRowIn 420ms var(--ease-out) both;
-  animation-delay: calc(var(--row-index, 0) * 42ms);
   transition:
     background 140ms var(--ease-snappy),
-    color 140ms var(--ease-snappy),
-    transform 160ms var(--ease-snappy);
+    color 140ms var(--ease-snappy);
 }
 
 tbody tr:nth-child(even) {
@@ -1105,8 +1067,6 @@ input:invalid:not(:placeholder-shown) {
   place-items: center;
   padding: var(--space-5);
   background: rgba(7, 7, 6, 0.72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 220ms var(--ease-out);
@@ -1251,7 +1211,7 @@ input:invalid:not(:placeholder-shown) {
 }
 
 .pipeline-step.active .pipeline-step-marker {
-  animation: breathe 1.3s var(--ease-in-out) infinite;
+  box-shadow: 0 0 14px var(--accent-glow);
 }
 
 .pipeline-payload {
@@ -1321,7 +1281,7 @@ input:invalid:not(:placeholder-shown) {
 }
 
 .flow-line.pulse {
-  animation: linePulse 1.7s var(--ease-in-out) infinite;
+  opacity: 0.66;
 }
 
 .flow-branches {
@@ -1685,9 +1645,5 @@ input:invalid:not(:placeholder-shown) {
   .reveal-card {
     opacity: 1;
     transform: none;
-  }
-
-  .cursor-glow {
-    display: none;
   }
 }
