@@ -1,5 +1,49 @@
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const PIPELINE_TICK_MS = 1000;
+const textCache = new WeakMap();
+const htmlCache = new WeakMap();
+const progressCache = new WeakMap();
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD'
+});
+const clockFormatter = new Intl.DateTimeFormat('en-US', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit'
+});
+
+function setTextContent(element, value) {
+  if (!element) return;
+
+  const nextValue = String(value);
+  if (textCache.get(element) === nextValue && element.textContent === nextValue) return;
+
+  textCache.set(element, nextValue);
+  element.textContent = nextValue;
+}
+
+function setHtmlContent(element, value) {
+  if (!element) return;
+
+  if (htmlCache.get(element) === value && element.innerHTML === value) return;
+
+  htmlCache.set(element, value);
+  element.innerHTML = value;
+}
+
+function setProgressBar(element, value, isFailed) {
+  if (!element) return;
+
+  const progress = clamp(Number(value) || 0, 0, 100);
+  const key = `${progress}:${Boolean(isFailed)}`;
+
+  if (progressCache.get(element) === key) return;
+
+  progressCache.set(element, key);
+  element.style.transform = `scaleX(${progress / 100})`;
+  element.classList.toggle('failed', Boolean(isFailed));
+}
 
 function prettyJson(data) {
   return JSON.stringify(data, null, 2);
@@ -29,18 +73,11 @@ function formatCurrency(value) {
     return `$${escapeHtml(value)}`;
   }
 
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD'
-  }).format(amount);
+  return currencyFormatter.format(amount);
 }
 
 function formatClock(date = new Date()) {
-  return new Intl.DateTimeFormat('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  }).format(date);
+  return clockFormatter.format(date);
 }
 
 function stockClass(stock) {
@@ -56,7 +93,9 @@ function setButtonBusy(button, isBusy, busyText) {
   const label = button.querySelector('span:last-child');
 
   if (isBusy) {
-    button.dataset.defaultLabel = label ? label.textContent.trim() : button.textContent.trim();
+    if (!button.dataset.defaultLabel) {
+      button.dataset.defaultLabel = label ? label.textContent.trim() : button.textContent.trim();
+    }
     button.disabled = true;
     button.classList.add('is-busy');
     button.setAttribute('aria-busy', 'true');
@@ -71,10 +110,12 @@ function setButtonBusy(button, isBusy, busyText) {
   if (button.dataset.defaultLabel && label) {
     label.textContent = button.dataset.defaultLabel;
   }
+
+  delete button.dataset.defaultLabel;
 }
 
 function renderResult(target, payload, state = 'default') {
-  target.textContent = prettyJson(payload);
+  setTextContent(target, prettyJson(payload));
   target.className = `result ${state === 'compact' ? 'compact' : ''}`.trim();
 
   if (!target.animate || motionQuery.matches || state === 'compact') return;
@@ -113,12 +154,12 @@ function setHealthState(kind, message, timestamp = '') {
   const serviceState = document.getElementById('serviceState');
 
   healthBadge.className = `status-chip ${kind}`;
-  healthBadge.innerHTML = `
+  setHtmlContent(healthBadge, `
     <span class="status-dot"></span>
     <span>${escapeHtml(message)}</span>
-  `;
+  `);
 
-  serviceState.textContent = message;
+  setTextContent(serviceState, message);
 
   if (timestamp) {
     healthBadge.title = `Last checked: ${timestamp}`;
@@ -163,25 +204,6 @@ function setInventoryStatus(message, kind = 'neutral') {
   const inventoryStatus = document.getElementById('inventoryStatus');
   inventoryStatus.textContent = message;
   inventoryStatus.className = `inline-status ${kind}`;
-}
-
-function addRipple(event) {
-  const button = event.currentTarget;
-  const ripple = document.createElement('span');
-  const rect = button.getBoundingClientRect();
-  const size = Math.max(rect.width, rect.height);
-  const hasPointer = event.clientX !== 0 || event.clientY !== 0;
-  const x = hasPointer ? event.clientX - rect.left : rect.width / 2;
-  const y = hasPointer ? event.clientY - rect.top : rect.height / 2;
-
-  ripple.className = 'ripple';
-  ripple.style.width = `${size}px`;
-  ripple.style.height = `${size}px`;
-  ripple.style.left = `${x - size / 2}px`;
-  ripple.style.top = `${y - size / 2}px`;
-
-  button.appendChild(ripple);
-  ripple.addEventListener('animationend', () => ripple.remove());
 }
 
 function animateMetricNumber(element, value, suffix = '', prefix = '') {
@@ -294,35 +316,12 @@ function shakeElement(element) {
 function initRevealObserver() {
   const targets = document.querySelectorAll('.reveal-card');
 
-  targets.forEach((target, index) => {
-    target.style.setProperty('--reveal-index', index);
-  });
-
-  if (motionQuery.matches || !('IntersectionObserver' in window)) {
-    targets.forEach((target) => target.classList.add('is-visible'));
-    return;
-  }
-
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      entry.target.classList.add('is-visible');
-      observer.unobserve(entry.target);
-    });
-  }, { threshold: 0.1 });
-
-  targets.forEach((target) => observer.observe(target));
+  targets.forEach((target) => target.classList.add('is-visible'));
 }
 
 function initClock() {
   const systemTime = document.getElementById('systemTime');
-
-  function updateTime() {
-    systemTime.textContent = `Local time ${formatClock()}`;
-    window.setTimeout(updateTime, 1000);
-  }
-
-  updateTime();
+  setTextContent(systemTime, `Local time ${formatClock()}`);
 }
 
 const checkHealthBtn = document.getElementById('checkHealthBtn');
@@ -610,18 +609,18 @@ function renderPipelineSummary(target, trace, includeLastCheck) {
     summaryItems.push(['Last check', trace.lastCheckedAt ? formatClock(new Date(trace.lastCheckedAt)) : 'None']);
   }
 
-  target.innerHTML = summaryItems.map(([label, value]) => `
+  setHtmlContent(target, summaryItems.map(([label, value]) => `
     <div>
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
     </div>
-  `).join('');
+  `).join(''));
 }
 
 function renderPipelineSteps(steps) {
   if (!pipelineSteps) return;
 
-  pipelineSteps.innerHTML = steps.map((step, index) => `
+  setHtmlContent(pipelineSteps, steps.map((step, index) => `
     <li class="pipeline-step ${escapeHtml(step.state)}">
       <span class="pipeline-step-marker">${index + 1}</span>
       <span>
@@ -630,7 +629,7 @@ function renderPipelineSteps(steps) {
       </span>
       <span class="pipeline-step-state">${escapeHtml(stateLabel(step.state))}</span>
     </li>
-  `).join('');
+  `).join(''));
 }
 
 function tracePayload(trace) {
@@ -657,15 +656,11 @@ function renderPipelineTrace(trace, options = {}) {
   const failed = trace.error || statusForTrace(trace) === 'FAILED';
   const status = statusForTrace(trace);
 
-  [pipelineProgressBar, inlinePipelineBar].forEach((bar) => {
-    if (!bar) return;
-    bar.style.width = `${progress}%`;
-    bar.classList.toggle('failed', Boolean(failed));
-  });
-
-  if (pipelinePercent) pipelinePercent.textContent = `${Math.round(progress)}%`;
-  if (inlinePipelinePercent) inlinePipelinePercent.textContent = `${Math.round(progress)}%`;
-  if (inlinePipelineBadge) inlinePipelineBadge.textContent = trace.timedOut ? 'Still processing' : status;
+  setProgressBar(pipelineProgressBar, progress, failed);
+  setProgressBar(inlinePipelineBar, progress, failed);
+  setTextContent(pipelinePercent, `${Math.round(progress)}%`);
+  setTextContent(inlinePipelinePercent, `${Math.round(progress)}%`);
+  setTextContent(inlinePipelineBadge, trace.timedOut ? 'Still processing' : status);
 
   renderPipelineSummary(pipelineSummary, trace, true);
   renderPipelineSummary(inlinePipelineSummary, trace, false);
@@ -674,7 +669,7 @@ function renderPipelineTrace(trace, options = {}) {
   }
 
   if (pipelineLivePayload && !options.skipPayload) {
-    pipelineLivePayload.textContent = prettyJson(tracePayload(trace));
+    setTextContent(pipelineLivePayload, prettyJson(tracePayload(trace)));
   }
 }
 
@@ -776,10 +771,6 @@ function pollOrderUntilTerminal(orderId, runId, options = {}) {
 resetInvoiceDownload();
 initRevealObserver();
 initClock();
-
-document.querySelectorAll('.button').forEach((button) => {
-  button.addEventListener('click', addRipple);
-});
 
 closePipelineBtn?.addEventListener('click', closePipelineDialog);
 
