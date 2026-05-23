@@ -24,7 +24,7 @@ variable "rds_name_prefix" {
 variable "admin_cidr" {
   description = "Admin CIDR allowed to reach Jenkins SSH and port 8080."
   type        = string
-  default     = "182.189.94.102/32"
+  default     = "182.189.93.246/32"
 
   validation {
     condition     = can(cidrhost(var.admin_cidr, 0))
