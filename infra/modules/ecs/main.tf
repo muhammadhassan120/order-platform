@@ -83,6 +83,9 @@ resource "aws_ecs_service" "main" {
   tags = {
     Name = var.service_name
   }
-}
 
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+}
 

@@ -132,4 +132,8 @@ resource "aws_instance" "jenkins" {
   tags = {
     Name = "${var.name_prefix}-jenkins"
   }
+
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
