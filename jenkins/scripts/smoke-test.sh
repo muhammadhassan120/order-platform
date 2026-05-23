@@ -57,7 +57,7 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://${ALB_DNS}/orders" \
 BODY=$(echo "${RESPONSE}" | head -n 1)
 HTTP_CODE=$(echo "${RESPONSE}" | tail -n 1)
 
-if [ "${HTTP_CODE}" != "201" ] && [ "${HTTP_CODE}" != "409" ]; then
+if [ "${HTTP_CODE}" != "201" ]; then
   echo "FAIL: Create order returned HTTP ${HTTP_CODE}"
   echo "Body: ${BODY}"
   exit 1

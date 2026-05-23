@@ -1,28 +1,67 @@
-# Placeholders to Replace
+# Current Deployment Values
 
-## jenkins/Jenkinsfile
-- `ECR_REPO = credentials('ecr-repo-url')`
-  - Replace only if your Jenkins credential ID is different.
-- `ARTIFACTS_S3 = 'PUT_YOUR_ARTIFACTS_BUCKET_NAME_HERE'`
-  - Replace with your artifacts bucket name.
-- `TASK_CONTAINER = 'order-api'`
-  - Replace only if your ECS task container name is different.
+Only these values are expected to be client-specific.
 
-## jenkins/Jenkinsfile.infra
-- `TF_STATE_BUCKET = 'PUT_YOUR_TERRAFORM_STATE_BUCKET_HERE'`
-  - Replace with your Terraform state S3 bucket.
+## Terraform Values
 
-## jenkins/scripts/rollback.sh
-- `--repository-name PUT_YOUR_ECR_REPOSITORY_NAME_HERE`
-  - Replace with your ECR repository name, not full URL.
-- `ECR_REPO:=PUT_YOUR_ECR_REPO_URL_HERE`
-  - Replace with your full ECR repo URL.
+Files:
 
-## docs/runbook.md
-Replace manual values when documenting or testing:
-- `<alb-dns>`
-- `<cloudfront-domain>`
-- `<rds-endpoint>`
-- `<db>`
-- `<user>`
-- `<password>`
+```text
+infra/terraform.tfvars
+infra/environments/dev.tfvars
+```
+
+Current demo values:
+
+```hcl
+aws_region      = "us-east-2"
+name_prefix     = "order-platform"
+rds_name_prefix = "order-platform-latet"
+admin_cidr      = "182.189.94.102/32"
+key_pair_name   = "order-platform-key"
+repo_url        = "https://github.com/muhammadhassan120/order-platform.git"
+db_name         = "mydb"
+db_username     = "appuser"
+ses_from_email  = "hammadmuqaddam@gmail.com"
+```
+
+For another client, replace:
+
+```text
+admin_cidr
+key_pair_name
+repo_url
+ses_from_email
+```
+
+Change `name_prefix` or `rds_name_prefix` only before the first apply.
+
+## Terraform Backend
+
+There is no hardcoded backend bucket in `infra/versions.tf`.
+
+Jenkins infra pipeline creates/checks:
+
+```text
+order-platform-tfstate-<active-aws-account-id>
+```
+
+Local deployments should generate `infra/backend.generated.tf` and pass backend config during `terraform init`.
+
+## Jenkins Values
+
+Jenkins computes the active AWS account ID with:
+
+```bash
+aws sts get-caller-identity
+```
+
+No ECR account ID placeholder should be edited manually. Keep these names aligned with Terraform if renamed:
+
+```text
+ECR_REPOSITORY = order-platform-repo
+ECS_CLUSTER    = order-platform-cluster
+ECS_SERVICE    = order-platform-service
+TASK_CONTAINER = order-api
+LAMBDA_FUNCTION = order-platform-order-processor
+```

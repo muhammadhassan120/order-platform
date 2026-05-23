@@ -1,154 +1,184 @@
 # Order Platform Runbook
 
-## Overview
-This project is an event-driven order processing platform.
+## Flow
 
-Main flow:
-1. User opens `/` and sees the built-in UI
-2. UI or API client sends `POST /orders` to Order API
-3. API writes order to PostgreSQL
-4. API publishes message to SQS
-5. Lambda processes order asynchronously
-6. Lambda updates order status, writes audit trail, stores invoice in S3, publishes SNS notification
-
-## Main Components
-- CloudFront in front of ALB
-- ALB in front of ECS Fargate service for `order-api`
-- RDS PostgreSQL
-- SQS queue + DLQ
-- Lambda `order-processor`
-- DynamoDB audit table
-- S3 invoice bucket
-- SNS topics for notifications and ops alerts
-- Jenkins for CI/CD
-- CloudWatch dashboard and alarms
-
-## Important Environment Variables
-
-### Order API
-- `PORT`
-- `AWS_REGION`
-- `DB_SECRET_ARN`
-- `ORDER_QUEUE_URL`
-- `AUTH_ENABLED`
-- `API_KEY`
-
-### Lambda
-- `AUDIT_TABLE`
-- `SNS_TOPIC_ARN`
-- `INVOICE_BUCKET`
-- `DB_SECRET_ARN`
-- `OPS_ALERT_TOPIC`
-
-## Health Check
-```bash
-curl http://<alb-dns>/health
-```
-
-## Open Browser UI
 ```text
-http://<alb-dns>/
+Browser/UI -> CloudFront HTTPS -> ALB HTTP -> ECS order-api -> RDS
+order-api -> SQS -> Lambda order-processor -> RDS/DynamoDB/S3/SES/SNS
+Jenkins -> ECR immutable image tags -> ECS
+Jenkins -> packaged Lambda zip -> Lambda
 ```
 
-Or if CloudFront is in front:
-```text
-https://<cloudfront-domain>/
+CloudFront redirects viewers to HTTPS. The ALB origin remains HTTP.
+
+## API Behavior
+
+`POST /orders` accepts:
+
+```json
+{
+  "customer_email": "test@example.com",
+  "items": [{ "product_id": "SMOKE-001", "qty": 1 }]
+}
 ```
 
-## Create Order
+Rules:
+
+- `customer_email` must be a valid email.
+- `items` must be a non-empty array.
+- `qty` must be a positive integer.
+- Missing product or insufficient stock returns conflict.
+- SQS publish failure after DB commit marks the order `FAILED` and restores stock.
+
+API auth is off by default with `AUTH_ENABLED=false`.
+
+## Common Commands
+
+Health:
+
 ```bash
-curl -X POST http://<alb-dns>/orders \
+curl http://<alb_dns_name>/health
+```
+
+Create order:
+
+```bash
+curl -i -X POST http://<alb_dns_name>/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "customer_email": "test@example.com",
-    "items": [
-      { "product_id": "PROD-001", "qty": 1 }
-    ]
-  }'
+  -d '{"customer_email":"test@example.com","items":[{"product_id":"SMOKE-001","qty":1}]}'
 ```
 
-## Check Order
+Check order:
+
 ```bash
-curl http://<alb-dns>/orders/1
+curl http://<alb_dns_name>/orders/<order_id>
 ```
 
-## Seed Database
-Run after RDS is up:
+Open UI:
+
+```text
+https://<cloudfront_distribution_domain_name>/
+```
+
+## Terraform
+
+Local validation:
+
 ```bash
-psql "host=<rds-endpoint> port=5432 dbname=<db> user=<user> password=<password> sslmode=require" -f scripts/seed-db.sql
+bash scripts/package-lambda.sh
+terraform -chdir=infra fmt -check -recursive
+terraform -chdir=infra init -backend=false
+terraform -chdir=infra validate
+terraform -chdir=infra plan -refresh=false -input=false -var-file=environments/dev.tfvars
 ```
 
-## Jenkins Pipelines
+Jenkins infra deployment uses `jenkins/Jenkinsfile.infra`. It only supports `dev`, packages Lambda before planning, creates/checks the S3 state bucket `order-platform-tfstate-<account-id>`, writes `infra/backend.generated.tf`, and runs Terraform with backend config.
 
-### App pipeline
-File:
-- `jenkins/Jenkinsfile`
+## Jenkins
 
-Stages:
-- checkout
-- test
-- docker build/push
+App pipeline: `jenkins/Jenkinsfile`
+
+Main stages:
+
+- `npm ci` and API tests
+- Lambda pytest checks
+- `scripts/package-lambda.sh`
+- Docker build and immutable ECR push
+- Lambda code update
 - ECS deploy
-- smoke test
-- archive
+- smoke test requiring `POST /orders` to return `201`
 
-### Infra pipeline
-File:
-- `jenkins/Jenkinsfile.infra`
+Required Jenkins plugins include Pipeline, Git, and Workspace Cleanup for `cleanWs()`.
 
-Stages:
-- terraform init
-- terraform plan
-- approval
-- terraform apply/destroy
+Rollback:
 
-## Smoke Test
 ```bash
-./jenkins/scripts/smoke-test.sh
+AWS_REGION=us-east-2 ./jenkins/scripts/rollback.sh <previous-image-tag>
 ```
 
-## Rollback
-```bash
-./jenkins/scripts/rollback.sh <previous-image-tag>
+The rollback script computes the active AWS account and ECR URL dynamically.
+
+## Lambda
+
+Source of truth:
+
+```text
+services/order-processor/
 ```
 
-## Common Failure Cases
+Package build target:
 
-### 1. `/health` returns 503
-Possible reasons:
-- RDS not reachable
-- wrong DB secret ARN
-- secret JSON format wrong
-- security group issue
+```text
+infra/modules/async/lambda_build/
+```
 
-### 2. Order creation fails with 409
-Possible reasons:
-- product not found
-- not enough stock
+Refresh package source/dependencies:
 
-### 3. Orders remain stuck in `PENDING`
-Possible reasons:
-- SQS trigger not attached
-- Lambda failing
-- Lambda cannot connect to RDS
-- DLQ filling up
+```bash
+bash scripts/package-lambda.sh
+```
 
-### 4. Jenkins deploy fails
-Possible reasons:
-- ECR login issue
-- missing IAM permissions
-- wrong task definition/service name
-- jq missing on Jenkins server
+Retry behavior:
 
-## Manual Verification Checklist
-- `/health` returns 200
-- UI opens at `/`
-- inventory loads
-- create order works
-- order row created in RDS
-- SQS receives message
-- Lambda processes message
-- order becomes `COMPLETED`
-- invoice written to S3
-- audit event written to DynamoDB
-- SNS notification published
+- Completed orders are skipped.
+- Payment references and invoice object keys are deterministic per order.
+- SES and SNS failures are logged after completion and do not force SQS retries.
+
+## Database Seed
+
+Terraform seeds through SSM on the Jenkins EC2 instance. No local SSH key path is required for seeding.
+
+Manual fallback from Jenkins:
+
+```bash
+git clone https://github.com/client-org/order-platform.git order-platform
+cd order-platform
+PGPASSWORD="<db-password>" psql \
+  "host=<rds-host> port=5432 dbname=mydb user=<db-user> sslmode=require" \
+  -f scripts/seed-db.sql
+```
+
+Seeded products:
+
+```text
+SMOKE-001
+PROD-001
+PROD-002
+PROD-003
+PROD-004
+```
+
+## Troubleshooting
+
+`/health` returns `503`: check RDS reachability, DB secret ARN, and ECS security group egress.
+
+Order returns `400`: check email, item list, and integer `qty`.
+
+Order returns conflict: product is missing or stock is insufficient.
+
+Order returns SQS error: check queue URL, ECS IAM permissions, and SQS health; the order should be `FAILED` with stock restored.
+
+Order stays `PENDING`: check Lambda CloudWatch logs, event source mapping, RDS connectivity, and SQS DLQ.
+
+Invoice missing: confirm the order is `COMPLETED`, Lambda S3 permission exists, and the object key is under `invoices/<order_id>/`.
+
+Email missing: confirm SES sender is verified in `us-east-2`; sandbox accounts may also require verified recipients.
+
+Jenkins cannot push image: check Jenkins IAM, Docker availability, ECR repo name, and `aws sts get-caller-identity`.
+
+Jenkins `cleanWs` fails: install the Workspace Cleanup plugin.
+
+## Verification Checklist
+
+- Terraform fmt, validate, and plan pass.
+- API tests pass.
+- Lambda pytest tests pass.
+- Lambda package script runs.
+- Jenkins app pipeline succeeds.
+- `/health` returns `200`.
+- Inventory loads.
+- `POST /orders` returns `201`.
+- Order becomes `COMPLETED`.
+- Invoice exists in S3.
+- Audit event exists in DynamoDB.
+- SQS DLQ stays empty during normal testing.

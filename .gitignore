@@ -1,9 +1,16 @@
 node_modules/
 coverage/
 .env
+__pycache__/
+*.pyc
+.pytest_cache/
 terraform.tfstate
 terraform.tfstate.backup
+*.tfstate
+*.tfstate.backup
 .terraform/
+infra/backend.generated.tf
+infra/modules/async/lambda_build/
 *.zip
 *.log
 .DS_Store

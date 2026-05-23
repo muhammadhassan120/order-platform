@@ -10,22 +10,45 @@ function buildApp(router) {
   return app;
 }
 
-describe('orders route', () => {
-  function completedOrder(overrides = {}) {
-    return {
-      id: 42,
-      customer_email: 'customer@example.com',
-      items: [{ product_id: 'SMOKE-001', qty: 1 }],
-      total: '0.01',
-      status: 'COMPLETED',
-      created_at: new Date('2026-05-02T06:00:00.000Z'),
-      processed_at: new Date('2026-05-02T06:00:04.250Z'),
-      payment_ref: 'PAY-42',
-      invoice_key: 'invoices/42/PAY-42.txt',
-      ...overrides
-    };
-  }
+function completedOrder(overrides = {}) {
+  return {
+    id: 42,
+    customer_email: 'customer@example.com',
+    items: [{ product_id: 'SMOKE-001', qty: 1 }],
+    total: '0.01',
+    status: 'COMPLETED',
+    created_at: new Date('2026-05-02T06:00:00.000Z'),
+    processed_at: new Date('2026-05-02T06:00:04.250Z'),
+    payment_ref: 'PAY-42',
+    invoice_key: 'invoices/42/PAY-42.txt',
+    ...overrides
+  };
+}
 
+function orderClient({ productRows, insertedOrder }) {
+  return {
+    query: jest.fn(async (sql) => {
+      const text = String(sql);
+
+      if (text === 'BEGIN' || text === 'COMMIT' || text === 'ROLLBACK') {
+        return {};
+      }
+
+      if (text.includes('SELECT id, price, stock')) {
+        return { rows: productRows };
+      }
+
+      if (text.includes('INSERT INTO orders')) {
+        return { rows: [insertedOrder] };
+      }
+
+      return {};
+    }),
+    release: jest.fn()
+  };
+}
+
+describe('orders route', () => {
   test('GET /orders/:id returns live pipeline metadata', async () => {
     const pool = {
       query: jest.fn().mockResolvedValue({
@@ -116,41 +139,21 @@ describe('orders route', () => {
   });
 
   test('POST /orders returns queue timing and pending pipeline metadata', async () => {
-    const client = {
-      query: jest.fn(async (sql) => {
-        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
-          return {};
+    const client = orderClient({
+      productRows: [
+        {
+          id: 'SMOKE-001',
+          price: '0.01',
+          stock: 10
         }
-
-        if (sql.includes('SELECT id, price, stock')) {
-          return {
-            rows: [
-              {
-                id: 'SMOKE-001',
-                price: '0.01',
-                stock: 10
-              }
-            ]
-          };
-        }
-
-        if (sql.includes('INSERT INTO orders')) {
-          return {
-            rows: [
-              {
-                id: 7,
-                status: 'PENDING',
-                total: '0.01',
-                created_at: new Date('2026-05-02T06:00:00.000Z')
-              }
-            ]
-          };
-        }
-
-        return {};
-      }),
-      release: jest.fn()
-    };
+      ],
+      insertedOrder: {
+        id: 7,
+        status: 'PENDING',
+        total: '0.01',
+        created_at: new Date('2026-05-02T06:00:00.000Z')
+      }
+    });
 
     const pool = {
       connect: jest.fn().mockResolvedValue(client)
@@ -180,5 +183,130 @@ describe('orders route', () => {
     expect(response.body.pipeline.status).toBe('PENDING');
     expect(response.body.pipeline.percent).toBeGreaterThan(0);
     expect(sqsClient.send).toHaveBeenCalledTimes(1);
+    expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
+  });
+
+  test('POST /orders rejects invalid email before opening a DB connection', async () => {
+    const poolPromise = jest.fn();
+    const app = buildApp(createOrdersRouter({
+      poolPromise,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: 'queue-url'
+    }));
+
+    const response = await request(app)
+      .post('/orders')
+      .send({
+        customer_email: 'not-an-email',
+        items: [{ product_id: 'SMOKE-001', qty: 1 }]
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('valid email');
+    expect(poolPromise).not.toHaveBeenCalled();
+  });
+
+  test('POST /orders rejects fractional quantities before opening a DB connection', async () => {
+    const poolPromise = jest.fn();
+    const app = buildApp(createOrdersRouter({
+      poolPromise,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: 'queue-url'
+    }));
+
+    const response = await request(app)
+      .post('/orders')
+      .send({
+        customer_email: 'customer@example.com',
+        items: [{ product_id: 'SMOKE-001', qty: 1.5 }]
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('positive integer qty');
+    expect(poolPromise).not.toHaveBeenCalled();
+  });
+
+  test('POST /orders rejects missing queue URL before opening a DB connection', async () => {
+    const poolPromise = jest.fn();
+    const app = buildApp(createOrdersRouter({
+      poolPromise,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: ''
+    }));
+
+    const response = await request(app)
+      .post('/orders')
+      .send({
+        customer_email: 'customer@example.com',
+        items: [{ product_id: 'SMOKE-001', qty: 1 }]
+      });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toBe('ORDER_QUEUE_URL is not configured');
+    expect(poolPromise).not.toHaveBeenCalled();
+  });
+
+  test('POST /orders marks order failed and restores stock if SQS publish fails after commit', async () => {
+    const createdOrder = {
+      id: 7,
+      status: 'PENDING',
+      total: '0.01',
+      created_at: new Date('2026-05-02T06:00:00.000Z')
+    };
+    const createClient = orderClient({
+      productRows: [
+        {
+          id: 'SMOKE-001',
+          price: '0.01',
+          stock: 10
+        }
+      ],
+      insertedOrder: createdOrder
+    });
+    const compensationClient = {
+      query: jest.fn().mockResolvedValue({}),
+      release: jest.fn()
+    };
+    const pool = {
+      connect: jest.fn()
+        .mockResolvedValueOnce(createClient)
+        .mockResolvedValueOnce(compensationClient)
+    };
+    const sqsClient = { send: jest.fn().mockRejectedValue(new Error('SQS down')) };
+    const app = buildApp(createOrdersRouter({
+      poolPromise: async () => pool,
+      sqsClient,
+      orderQueueUrl: 'queue-url'
+    }));
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    let response;
+    try {
+      response = await request(app)
+        .post('/orders')
+        .send({
+          customer_email: 'customer@example.com',
+          items: [{ product_id: 'SMOKE-001', qty: 1 }]
+        });
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({
+      error: 'SQS down',
+      order_id: 7,
+      status: 'FAILED'
+    });
+    expect(compensationClient.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET stock = stock + $1'),
+      [1, 'SMOKE-001']
+    );
+    expect(compensationClient.query).toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'FAILED'"),
+      [7]
+    );
+    expect(createClient.release).toHaveBeenCalledTimes(1);
+    expect(compensationClient.release).toHaveBeenCalledTimes(1);
   });
 });

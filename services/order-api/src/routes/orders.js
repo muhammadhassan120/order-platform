@@ -4,6 +4,7 @@ const { SendMessageCommand } = require('@aws-sdk/client-sqs');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const INVOICE_URL_EXPIRES_IN_SECONDS = 300;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function toIso(value) {
   if (!value) return null;
@@ -99,6 +100,78 @@ function isValidInvoiceKey(invoiceKey) {
     !invoiceKey.includes('\\');
 }
 
+function validateOrderPayload(body) {
+  const customerEmail = String(body?.customer_email || '').trim();
+
+  if (!EMAIL_PATTERN.test(customerEmail)) {
+    return { error: 'customer_email must be a valid email address' };
+  }
+
+  if (!Array.isArray(body?.items) || body.items.length === 0) {
+    return { error: 'items[] must contain at least one item' };
+  }
+
+  const items = [];
+
+  for (const item of body.items) {
+    const productId = String(item?.product_id || '').trim();
+    const qty = Number(item?.qty);
+
+    if (!productId || !Number.isInteger(qty) || qty <= 0) {
+      return { error: 'Each item must contain product_id and a positive integer qty' };
+    }
+
+    items.push({
+      product_id: productId,
+      qty
+    });
+  }
+
+  return {
+    customer_email: customerEmail,
+    items
+  };
+}
+
+async function markOrderFailedAndRestoreStock(poolPromise, orderId, items) {
+  const pool = await poolPromise();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const item of items) {
+      await client.query(
+        `
+        UPDATE products
+        SET stock = stock + $1
+        WHERE id = $2
+        `,
+        [item.qty, item.product_id]
+      );
+    }
+
+    await client.query(
+      `
+      UPDATE orders
+      SET status = 'FAILED',
+          processed_at = NOW()
+      WHERE id = $1
+      `,
+      [orderId]
+    );
+
+    await client.query('COMMIT');
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function findOrder(poolPromise, orderId) {
   const pool = await poolPromise();
   const { rows } = await pool.query(
@@ -124,29 +197,35 @@ module.exports = function createOrdersRouter({
   const router = express.Router();
 
   router.post('/', async (req, res) => {
-    const { customer_email, items } = req.body;
+    const validation = validateOrderPayload(req.body);
 
-    if (!customer_email || !items?.length) {
+    if (validation.error) {
       return res.status(400).json({
-        error: 'customer_email and items[] required'
+        error: validation.error
       });
     }
 
+    if (!orderQueueUrl) {
+      return res.status(500).json({ error: 'ORDER_QUEUE_URL is not configured' });
+    }
+
+    if (!sqsClient) {
+      return res.status(500).json({ error: 'SQS client is not configured' });
+    }
+
+    const { customer_email, items } = validation;
     const pool = await poolPromise();
     const client = await pool.connect();
+    let order = null;
+    let transactionOpen = false;
 
     try {
       await client.query('BEGIN');
+      transactionOpen = true;
 
       let total = 0;
 
       for (const item of items) {
-        const qty = Number(item.qty);
-
-        if (!item.product_id || !qty || qty <= 0) {
-          throw new Error('Each item must contain product_id and qty > 0');
-        }
-
         const { rows } = await client.query(
           `
           SELECT id, price, stock
@@ -161,11 +240,17 @@ module.exports = function createOrdersRouter({
           throw new Error(`Product ${item.product_id} not found`);
         }
 
-        if (rows[0].stock < qty) {
+        const price = Number(rows[0].price);
+
+        if (!Number.isFinite(price)) {
+          throw new Error(`Invalid price for ${item.product_id}`);
+        }
+
+        if (rows[0].stock < item.qty) {
           throw new Error(`Insufficient stock for ${item.product_id}`);
         }
 
-        total += Number(rows[0].price) * qty;
+        total += price * item.qty;
 
         await client.query(
           `
@@ -173,11 +258,15 @@ module.exports = function createOrdersRouter({
           SET stock = stock - $1
           WHERE id = $2
           `,
-          [qty, item.product_id]
+          [item.qty, item.product_id]
         );
       }
 
-      const { rows: [order] } = await client.query(
+      if (!Number.isFinite(total)) {
+        throw new Error('Order total must be finite');
+      }
+
+      const { rows: [createdOrder] } = await client.query(
         `
         INSERT INTO orders (customer_email, items, total, status, created_at)
         VALUES ($1, $2, $3, 'PENDING', NOW())
@@ -185,12 +274,10 @@ module.exports = function createOrdersRouter({
         `,
         [customer_email, JSON.stringify(items), total]
       );
+      order = createdOrder;
 
       await client.query('COMMIT');
-
-      if (!orderQueueUrl) {
-        throw new Error('ORDER_QUEUE_URL is not configured');
-      }
+      transactionOpen = false;
 
       await sqsClient.send(new SendMessageCommand({
         QueueUrl: orderQueueUrl,
@@ -220,16 +307,41 @@ module.exports = function createOrdersRouter({
         pipeline: buildOrderPipeline({ ...order, status: 'PENDING' }, queuedAt)
       });
     } catch (err) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (_) {}
+      if (transactionOpen) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {}
+      }
 
       console.error('Order creation failed:', err);
+
+      if (order?.id) {
+        let compensationError = null;
+
+        try {
+          await markOrderFailedAndRestoreStock(poolPromise, order.id, items);
+        } catch (restoreErr) {
+          compensationError = restoreErr;
+          console.error('Order compensation failed:', restoreErr);
+        }
+
+        const body = {
+          error: err.message,
+          order_id: order.id,
+          status: 'FAILED'
+        };
+
+        if (compensationError) {
+          body.compensation_error = compensationError.message;
+        }
+
+        return res.status(500).json(body);
+      }
 
       const statusCode =
         err.message.includes('Insufficient') ||
         err.message.includes('not found') ||
-        err.message.includes('Each item')
+        err.message.includes('Invalid price')
           ? 409
           : 500;
 

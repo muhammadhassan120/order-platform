@@ -888,9 +888,9 @@ document.getElementById('createOrderForm').addEventListener('submit', async (eve
   const productId = document.getElementById('productId').value.trim();
   const quantity = Number(document.getElementById('qty').value);
 
-  if (!customerEmail || !productId || !quantity || quantity <= 0) {
+  if (!customerEmail || !productId || !Number.isInteger(quantity) || quantity <= 0) {
     renderResult(createOrderResult, {
-      error: 'customer_email, product_id, and qty > 0 are required'
+      error: 'customer_email, product_id, and positive integer qty are required'
     });
     shakeElement(form);
     addActivity('Order form validation failed.');

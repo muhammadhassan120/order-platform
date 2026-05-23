@@ -3,21 +3,25 @@ set -euo pipefail
 
 PREVIOUS_TAG="${1:-}"
 
+: "${AWS_REGION:=us-east-2}"
+: "${ECR_REPOSITORY:=order-platform-repo}"
+: "${ECS_CLUSTER:=order-platform-cluster}"
+: "${ECS_SERVICE:=order-platform-service}"
+: "${TASK_CONTAINER:=order-api}"
+
+AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+ECR_REPO="${ECR_REPO:-${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}}"
+
 if [ -z "${PREVIOUS_TAG}" ]; then
   echo "Usage: ./rollback.sh <previous-image-tag>"
   echo "Recent tags:"
   aws ecr describe-images \
-    --repository-name order-platform-repo \
+    --region "${AWS_REGION}" \
+    --repository-name "${ECR_REPOSITORY}" \
     --query 'imageDetails | sort_by(@, &imagePushedAt) | [-5:].imageTags[0]' \
     --output table
   exit 1
 fi
-
-: "${AWS_REGION:=us-east-2}"
-: "${ECR_REPO:=992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo}"
-: "${ECS_CLUSTER:=order-platform-cluster}"
-: "${ECS_SERVICE:=order-platform-service}"
-: "${TASK_CONTAINER:=order-api}"
 
 echo "Rolling back to image tag: ${PREVIOUS_TAG}"
 

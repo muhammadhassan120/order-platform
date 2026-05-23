@@ -24,6 +24,7 @@ const region = process.env.AWS_REGION || 'us-east-2';
 const orderQueueUrl = process.env.ORDER_QUEUE_URL;
 const dbSecretArn = process.env.DB_SECRET_ARN;
 const invoiceBucket = process.env.INVOICE_BUCKET;
+const dbSslRejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
 
 const secretsClient = new SecretsManagerClient({ region });
 const sqsClient = new SQSClient({ region });
@@ -50,7 +51,7 @@ async function initDB() {
     database: creds.dbname,
     user: creds.username,
     password: creds.password,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: dbSslRejectUnauthorized },
     max: 20
   });
 

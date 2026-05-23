@@ -3,10 +3,11 @@ pipeline {
 
   environment {
     AWS_REGION     = 'us-east-2'
-    ECR_REPO       = '992382749898.dkr.ecr.us-east-2.amazonaws.com/order-platform-repo'
+    ECR_REPOSITORY = 'order-platform-repo'
     ECS_CLUSTER    = 'order-platform-cluster'
     ECS_SERVICE    = 'order-platform-service'
     TASK_CONTAINER = 'order-api'
+    LAMBDA_FUNCTION = 'order-platform-order-processor'
   }
 
   stages {
@@ -18,6 +19,11 @@ pipeline {
             returnStdout: true,
             script: 'git rev-parse --short HEAD'
           ).trim()
+          env.AWS_ACCOUNT_ID = sh(
+            returnStdout: true,
+            script: 'aws sts get-caller-identity --query Account --output text'
+          ).trim()
+          env.ECR_REPO = "${env.AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPOSITORY}"
           env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
         }
       }
@@ -26,9 +32,21 @@ pipeline {
     stage('Test: Order API') {
       steps {
         dir('services/order-api') {
-          sh 'npm install'
+          sh 'npm ci'
           sh 'npm test'
         }
+      }
+    }
+
+    stage('Test & Package: Lambda') {
+      steps {
+        sh '''
+          set -e
+          python3 -m pip install --user pytest || true
+          python3 -m pytest services/order-processor/tests
+          chmod +x scripts/package-lambda.sh
+          PYTHON_BIN=python3 ./scripts/package-lambda.sh
+        '''
       }
     }
 
@@ -42,13 +60,25 @@ pipeline {
 
             docker build \
               -t ${ECR_REPO}:${IMAGE_TAG} \
-              -t ${ECR_REPO}:latest \
               -f Dockerfile .
 
             docker push ${ECR_REPO}:${IMAGE_TAG}
-            docker push ${ECR_REPO}:latest
           '''
         }
+      }
+    }
+
+    stage('Deploy: Lambda') {
+      steps {
+        sh '''
+          set -e
+          cd infra/modules/async/lambda_build
+          zip -qr ../lambda_function.zip .
+          aws lambda update-function-code \
+            --region ${AWS_REGION} \
+            --function-name ${LAMBDA_FUNCTION} \
+            --zip-file fileb://../lambda_function.zip
+        '''
       }
     }
 

@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import ssl
 from datetime import datetime, timezone
 
 import boto3
@@ -19,6 +20,10 @@ secrets_client = boto3.client("secretsmanager", region_name=REGION)
 dynamodb = boto3.resource("dynamodb", region_name=REGION)
 
 
+def build_db_ssl_context():
+    return ssl.create_default_context()
+
+
 def get_db_connection():
     resp = secrets_client.get_secret_value(SecretId=os.environ["DB_SECRET_ARN"])
     secret = json.loads(resp["SecretString"])
@@ -29,7 +34,7 @@ def get_db_connection():
         database=os.environ.get("DB_NAME", secret.get("dbname", "mydb")),
         user=secret["username"],
         password=secret["password"],
-        ssl_context=True,
+        ssl_context=build_db_ssl_context(),
     )
     conn.autocommit = False
     return conn
@@ -45,7 +50,7 @@ def build_invoice_text(order_id, customer_email, items, total, payment_ref):
         f"Payment Ref : {payment_ref}",
         f"Total       : {total}",
         f"Date        : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC",
-        f"Status      : COMPLETED",
+        "Status      : COMPLETED",
         "---------------------------",
         "Items:",
     ]
@@ -69,7 +74,7 @@ def build_invoice_html(order_id, customer_email, items, total, payment_ref):
     return f"""
     <html>
       <body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-        <h2 style="color:#2e7d32">Order #{order_id} — Confirmed ✅</h2>
+        <h2 style="color:#2e7d32">Order #{order_id} - Confirmed</h2>
         <p>Dear Customer,</p>
         <p>Your order has been <strong>successfully processed</strong>.</p>
 
@@ -86,11 +91,80 @@ def build_invoice_html(order_id, customer_email, items, total, payment_ref):
         </table>
 
         <br>
-        <p>Thank you for your order 🎉</p>
+        <p>Thank you for your order.</p>
         <p><em>Order Platform</em></p>
       </body>
     </html>
     """
+
+
+def build_payment_ref(order_id):
+    return f"PAY-{order_id}"
+
+
+def build_invoice_key(order_id, payment_ref):
+    return f"invoices/{order_id}/{payment_ref}.txt"
+
+
+def send_customer_email(order_id, customer_email, items, total, payment_ref, invoice_text):
+    from_email = os.environ.get("SES_FROM_EMAIL", "")
+    if not from_email:
+        logger.warning("SES_FROM_EMAIL not set; skipping customer email")
+        return
+
+    if not customer_email:
+        logger.warning("customer_email is empty for order %s", order_id)
+        return
+
+    try:
+        ses_client.send_email(
+            Source=from_email,
+            Destination={"ToAddresses": [customer_email]},
+            Message={
+                "Subject": {
+                    "Data": f"Your Order #{order_id} is Confirmed",
+                    "Charset": "UTF-8",
+                },
+                "Body": {
+                    "Text": {
+                        "Data": invoice_text,
+                        "Charset": "UTF-8",
+                    },
+                    "Html": {
+                        "Data": build_invoice_html(
+                            order_id=order_id,
+                            customer_email=customer_email,
+                            items=items,
+                            total=total,
+                            payment_ref=payment_ref,
+                        ),
+                        "Charset": "UTF-8",
+                    },
+                },
+            },
+        )
+        logger.info("SES email sent to customer=%s for order=%s", customer_email, order_id)
+    except Exception as exc:
+        logger.warning("SES email failed for order %s: %s", order_id, exc, exc_info=True)
+
+
+def publish_ops_alert(order_id, customer_email):
+    ops_topic = os.environ.get("OPS_ALERT_TOPIC", "")
+    if not ops_topic:
+        return
+
+    try:
+        sns_client.publish(
+            TopicArn=ops_topic,
+            Subject=f"[OrderPlatform] Order #{order_id} Processed",
+            Message=(
+                f"Order #{order_id} for customer {customer_email} "
+                f"processed at {datetime.now(timezone.utc).isoformat()} UTC."
+            ),
+        )
+        logger.info("Ops-alert published to SNS for order %s", order_id)
+    except Exception as exc:
+        logger.warning("Ops-alert publish failed for order %s: %s", order_id, exc, exc_info=True)
 
 
 def handler(event, context):
@@ -146,12 +220,11 @@ def handler(event, context):
             conn.commit()
             logger.info("Order %s marked PROCESSING", order_id)
 
-            # Use items from SQS body directly
             items = body.get("items", [])
             total = body.get("total", "0.00")
 
-            payment_ref = f"PAY-{order_id}-{int(datetime.now(timezone.utc).timestamp())}"
-            invoice_key = f"invoices/{order_id}/{payment_ref}.txt"
+            payment_ref = build_payment_ref(order_id)
+            invoice_key = build_invoice_key(order_id, payment_ref)
 
             audit_table = dynamodb.Table(os.environ["AUDIT_TABLE"])
             audit_table.put_item(
@@ -197,57 +270,10 @@ def handler(event, context):
             conn.commit()
             logger.info("Order %s marked COMPLETED", order_id)
 
-            from_email = os.environ.get("SES_FROM_EMAIL", "")
-            if not from_email:
-                logger.warning("SES_FROM_EMAIL not set — skipping customer email")
-            elif not customer_email:
-                logger.warning("customer_email is empty for order %s", order_id)
-            else:
-                ses_client.send_email(
-                    Source=from_email,
-                    Destination={"ToAddresses": [customer_email]},
-                    Message={
-                        "Subject": {
-                            "Data": f"Your Order #{order_id} is Confirmed! ✅",
-                            "Charset": "UTF-8",
-                        },
-                        "Body": {
-                            "Text": {
-                                "Data": invoice_text,
-                                "Charset": "UTF-8",
-                            },
-                            "Html": {
-                                "Data": build_invoice_html(
-                                    order_id=order_id,
-                                    customer_email=customer_email,
-                                    items=items,
-                                    total=total,
-                                    payment_ref=payment_ref,
-                                ),
-                                "Charset": "UTF-8",
-                            },
-                        },
-                    },
-                )
-                logger.info(
-                    "SES email sent to customer=%s for order=%s",
-                    customer_email,
-                    order_id,
-                )
+            send_customer_email(order_id, customer_email, items, total, payment_ref, invoice_text)
+            publish_ops_alert(order_id, customer_email)
 
-            ops_topic = os.environ.get("OPS_ALERT_TOPIC", "")
-            if ops_topic:
-                sns_client.publish(
-                    TopicArn=ops_topic,
-                    Subject=f"[OrderPlatform] Order #{order_id} Processed",
-                    Message=(
-                        f"Order #{order_id} for customer {customer_email} "
-                        f"processed at {datetime.now(timezone.utc).isoformat()} UTC."
-                    ),
-                )
-                logger.info("Ops-alert published to SNS for order %s", order_id)
-
-            logger.info("order_id=%s fully processed ✅", order_id)
+            logger.info("order_id=%s fully processed", order_id)
 
         except Exception as exc:
             logger.exception("Failed to process record: %s", exc)
