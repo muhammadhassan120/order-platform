@@ -31,10 +31,14 @@ pipeline {
 
     stage('Test: Order API') {
       steps {
-        dir('services/order-api') {
-          sh 'npm ci'
-          sh 'npm test'
-        }
+        sh '''
+          set -e
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace/services/order-api \
+            node:20-alpine \
+            sh -lc 'npm ci && npm test'
+        '''
       }
     }
 

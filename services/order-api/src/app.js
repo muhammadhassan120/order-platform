@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const { Pool } = require('pg');
 const { S3Client } = require('@aws-sdk/client-s3');
@@ -16,6 +17,7 @@ const createOrdersRouter = require('./routes/orders');
 const createInventoryRouter = require('./routes/inventory');
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(rateLimiter);
 
@@ -25,12 +27,27 @@ const orderQueueUrl = process.env.ORDER_QUEUE_URL;
 const dbSecretArn = process.env.DB_SECRET_ARN;
 const invoiceBucket = process.env.INVOICE_BUCKET;
 const dbSslRejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
+const dbSslCaPath = process.env.DB_SSL_CA_PATH;
 
 const secretsClient = new SecretsManagerClient({ region });
 const sqsClient = new SQSClient({ region });
 const s3Client = new S3Client({ region });
 
 let pool;
+
+function buildDbSslOptions() {
+  if (!dbSslRejectUnauthorized) {
+    return { rejectUnauthorized: false };
+  }
+
+  const sslOptions = { rejectUnauthorized: true };
+
+  if (dbSslCaPath) {
+    sslOptions.ca = fs.readFileSync(dbSslCaPath, 'utf8');
+  }
+
+  return sslOptions;
+}
 
 async function initDB() {
   if (pool) return pool;
@@ -51,7 +68,7 @@ async function initDB() {
     database: creds.dbname,
     user: creds.username,
     password: creds.password,
-    ssl: { rejectUnauthorized: dbSslRejectUnauthorized },
+    ssl: buildDbSslOptions(),
     max: 20
   });
 
@@ -97,4 +114,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, initDB };
+module.exports = { app, initDB, buildDbSslOptions };

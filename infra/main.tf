@@ -142,6 +142,10 @@ module "ecs" {
     {
       name  = "INVOICE_BUCKET"
       value = module.s3.invoice_bucket_name
+    },
+    {
+      name  = "DB_SSL_CA_PATH"
+      value = "/app/certs/rds-global-bundle.pem"
     }
   ]
 
