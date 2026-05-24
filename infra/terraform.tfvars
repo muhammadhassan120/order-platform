@@ -1,7 +1,7 @@
 aws_region      = "us-east-2"
 name_prefix     = "order-platform"
 rds_name_prefix = "order-platform-latet"
-admin_cidr      = "182.189.93.246/32"
+admin_cidr      = "182.189.94.29/32"
 key_pair_name   = "order-platform-key"
 repo_url        = "https://github.com/muhammadhassan120/order-platform.git"
 db_name         = "mydb"
