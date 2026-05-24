@@ -89,8 +89,15 @@ function withPipeline(order, queuedAt = null) {
 }
 
 function buildInvoiceFileName(orderId, invoiceKey) {
-  const extension = invoiceKey.split('.').pop() || 'txt';
+  const extensionMatch = String(invoiceKey || '').match(/\.([A-Za-z0-9]+)$/);
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : 'pdf';
   return `order-${orderId}-invoice.${extension}`;
+}
+
+function getInvoiceContentType(invoiceKey) {
+  return String(invoiceKey || '').toLowerCase().endsWith('.pdf')
+    ? 'application/pdf'
+    : 'text/plain';
 }
 
 function isValidInvoiceKey(invoiceKey) {
@@ -379,7 +386,7 @@ module.exports = function createOrdersRouter({
         Bucket: invoiceBucket,
         Key: order.invoice_key,
         ResponseContentDisposition: `attachment; filename="${buildInvoiceFileName(order.id, order.invoice_key)}"`,
-        ResponseContentType: 'text/plain'
+        ResponseContentType: getInvoiceContentType(order.invoice_key)
       });
       const invoiceUrl = await getSignedUrlFn(s3Client, command, {
         expiresIn: INVOICE_URL_EXPIRES_IN_SECONDS

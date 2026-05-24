@@ -20,7 +20,7 @@ function completedOrder(overrides = {}) {
     created_at: new Date('2026-05-02T06:00:00.000Z'),
     processed_at: new Date('2026-05-02T06:00:04.250Z'),
     payment_ref: 'PAY-42',
-    invoice_key: 'invoices/42/PAY-42.txt',
+    invoice_key: 'invoices/42/PAY-42.pdf',
     ...overrides
   };
 }
@@ -86,7 +86,7 @@ describe('orders route', () => {
         rows: [completedOrder()]
       })
     };
-    const getSignedUrlFn = jest.fn().mockResolvedValue('https://signed.example/invoice.txt');
+    const getSignedUrlFn = jest.fn().mockResolvedValue('https://signed.example/invoice.pdf');
     const app = buildApp(createOrdersRouter({
       poolPromise: async () => pool,
       sqsClient: { send: jest.fn() },
@@ -101,17 +101,49 @@ describe('orders route', () => {
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
       order_id: 42,
-      invoice_key: 'invoices/42/PAY-42.txt',
+      invoice_key: 'invoices/42/PAY-42.pdf',
       expires_in: 300,
-      invoice_url: 'https://signed.example/invoice.txt'
+      invoice_url: 'https://signed.example/invoice.pdf'
     });
     expect(getSignedUrlFn).toHaveBeenCalledWith(
       {},
       expect.objectContaining({
         input: expect.objectContaining({
           Bucket: 'order-platform-invoices',
-          Key: 'invoices/42/PAY-42.txt',
-          ResponseContentDisposition: 'attachment; filename="order-42-invoice.txt"'
+          Key: 'invoices/42/PAY-42.pdf',
+          ResponseContentDisposition: 'attachment; filename="order-42-invoice.pdf"',
+          ResponseContentType: 'application/pdf'
+        })
+      }),
+      { expiresIn: 300 }
+    );
+  });
+
+  test('GET /orders/:id/invoice keeps text/plain for existing text invoices', async () => {
+    const pool = {
+      query: jest.fn().mockResolvedValue({
+        rows: [completedOrder({ invoice_key: 'invoices/42/PAY-42.txt' })]
+      })
+    };
+    const getSignedUrlFn = jest.fn().mockResolvedValue('https://signed.example/invoice.txt');
+    const app = buildApp(createOrdersRouter({
+      poolPromise: async () => pool,
+      sqsClient: { send: jest.fn() },
+      orderQueueUrl: 'queue-url',
+      s3Client: {},
+      invoiceBucket: 'order-platform-invoices',
+      getSignedUrlFn
+    }));
+
+    const response = await request(app).get('/orders/42/invoice');
+
+    expect(response.status).toBe(200);
+    expect(getSignedUrlFn).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        input: expect.objectContaining({
+          ResponseContentDisposition: 'attachment; filename="order-42-invoice.txt"',
+          ResponseContentType: 'text/plain'
         })
       }),
       { expiresIn: 300 }

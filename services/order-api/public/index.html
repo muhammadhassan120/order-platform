@@ -196,18 +196,37 @@
         </form>
 
         <pre id="getOrderResult" class="result compact" aria-live="polite">No order fetched yet.</pre>
-        <div id="invoiceActions" class="invoice-actions is-hidden" aria-live="polite">
-          <a id="invoiceDownloadLink" class="button primary magnetic" href="#" target="_blank" rel="noopener noreferrer">
-            <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
-            </svg>
-            <span>Download Invoice</span>
-          </a>
-          <span id="invoiceDownloadMeta">Available after completion.</span>
-        </div>
       </section>
 
       <aside class="side-stack">
+        <section class="panel activity-panel reveal-card interactive-surface">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Activity</p>
+              <h2>Console Events</h2>
+            </div>
+          </div>
+          <div id="invoiceActions" class="invoice-actions" aria-live="polite">
+            <div class="invoice-action-copy">
+              <span class="invoice-action-kicker">PDF invoice</span>
+              <strong id="invoiceDownloadTitle">Waiting for completion</strong>
+              <span id="invoiceDownloadMeta">Available after completion.</span>
+            </div>
+            <a id="invoiceDownloadLink" class="button primary magnetic" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">
+              <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" />
+              </svg>
+              <span>Download PDF</span>
+            </a>
+          </div>
+          <ol id="activityFeed" class="activity-feed" aria-live="polite">
+            <li>
+              <span class="activity-time">Now</span>
+              <span>Frontend console initialized.</span>
+            </li>
+          </ol>
+        </section>
+
         <section class="panel flow-panel reveal-card interactive-surface">
           <div class="panel-header">
             <div>
@@ -229,21 +248,6 @@
               <span class="interactive-surface">SNS</span>
             </div>
           </div>
-        </section>
-
-        <section class="panel activity-panel reveal-card interactive-surface">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Activity</p>
-              <h2>Console Events</h2>
-            </div>
-          </div>
-          <ol id="activityFeed" class="activity-feed" aria-live="polite">
-            <li>
-              <span class="activity-time">Now</span>
-              <span>Frontend console initialized.</span>
-            </li>
-          </ol>
         </section>
       </aside>
     </main>

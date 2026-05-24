@@ -106,7 +106,21 @@ def test_completed_order_is_skipped(monkeypatch):
 
 def test_payment_reference_and_invoice_key_are_deterministic():
     assert processor.build_payment_ref(7) == "PAY-7"
-    assert processor.build_invoice_key(7, "PAY-7") == "invoices/7/PAY-7.txt"
+    assert processor.build_invoice_key(7, "PAY-7") == "invoices/7/PAY-7.pdf"
+
+
+def test_invoice_pdf_has_pdf_header_and_order_details():
+    invoice_pdf = processor.build_invoice_pdf(
+        order_id=7,
+        customer_email="customer@example.com",
+        items=[{"product_id": "SMOKE-001", "qty": 1}],
+        total="0.01",
+        payment_ref="PAY-7",
+    )
+
+    assert invoice_pdf.startswith(b"%PDF-1.4")
+    assert b"Order #7" in invoice_pdf
+    assert b"SMOKE-001" in invoice_pdf
 
 
 def test_notification_failures_do_not_retry_completed_order(monkeypatch):
@@ -127,10 +141,12 @@ def test_notification_failures_do_not_retry_completed_order(monkeypatch):
 
     assert conn.rollback.call_count == 0
     assert conn.commit.call_count == 2
-    assert processor.s3_client.put_object.call_args.kwargs["Key"] == "invoices/7/PAY-7.txt"
+    assert processor.s3_client.put_object.call_args.kwargs["Key"] == "invoices/7/PAY-7.pdf"
+    assert processor.s3_client.put_object.call_args.kwargs["ContentType"] == "application/pdf"
+    assert processor.s3_client.put_object.call_args.kwargs["Body"].startswith(b"%PDF-1.4")
     final_update = cursor.executed[-1]
     assert "SET status = %s" in final_update[0]
-    assert final_update[1] == ("COMPLETED", "PAY-7", "invoices/7/PAY-7.txt", 7)
+    assert final_update[1] == ("COMPLETED", "PAY-7", "invoices/7/PAY-7.pdf", 7)
     assert audit_table.put_item.call_count == 1
     assert processor.ses_client.send_email.call_count == 1
     assert processor.sns_client.publish.call_count == 1

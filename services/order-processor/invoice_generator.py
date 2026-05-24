@@ -29,4 +29,4 @@ def build_invoice_payload(
 
 
 def build_invoice_s3_key(order_id: str, payment_ref: str) -> str:
-    return f"invoices/{order_id}/{payment_ref}.json"
+    return f"invoices/{order_id}/{payment_ref}.pdf"

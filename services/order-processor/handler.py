@@ -64,6 +64,120 @@ def build_invoice_text(order_id, customer_email, items, total, payment_ref):
     return "\n".join(lines)
 
 
+def _format_money(value):
+    try:
+        return f"USD {float(value):,.2f}"
+    except (TypeError, ValueError):
+        return f"USD {value}"
+
+
+def _pdf_escape(value):
+    return (
+        str(value)
+        .encode("latin-1", "replace")
+        .decode("latin-1")
+        .replace("\\", "\\\\")
+        .replace("(", "\\(")
+        .replace(")", "\\)")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("\t", " ")
+    )
+
+
+def _pdf_text(text, x, y, size=12, font="F1", color=(0.13, 0.12, 0.1)):
+    r, g, b = color
+    return f"BT {r:.3f} {g:.3f} {b:.3f} rg /{font} {size} Tf {x} {y} Td ({_pdf_escape(text)}) Tj ET"
+
+
+def _pdf_rect(x, y, width, height, color):
+    r, g, b = color
+    return f"{r:.3f} {g:.3f} {b:.3f} rg {x} {y} {width} {height} re f"
+
+
+def build_invoice_pdf(order_id, customer_email, items, total, payment_ref):
+    issued_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    commands = [
+        _pdf_rect(0, 0, 612, 792, (1, 1, 1)),
+        _pdf_rect(0, 720, 612, 72, (0.05, 0.14, 0.18)),
+        _pdf_rect(0, 708, 612, 12, (0.09, 0.62, 0.42)),
+        _pdf_text("ORDER INVOICE", 48, 748, 28, "F2", (1, 1, 1)),
+        _pdf_text(f"Order #{order_id}", 48, 728, 13, "F1", (0.88, 0.96, 0.92)),
+        _pdf_rect(448, 738, 116, 28, (0.84, 0.7, 0.42)),
+        _pdf_text("COMPLETED", 466, 747, 12, "F2", (0.05, 0.14, 0.18)),
+        _pdf_rect(48, 610, 516, 72, (0.96, 0.98, 0.97)),
+        _pdf_rect(48, 676, 516, 6, (0.84, 0.7, 0.42)),
+        _pdf_text("Customer", 68, 650, 10, "F2", (0.38, 0.42, 0.39)),
+        _pdf_text(customer_email, 68, 630, 14, "F1", (0.1, 0.12, 0.12)),
+        _pdf_text("Payment reference", 336, 650, 10, "F2", (0.38, 0.42, 0.39)),
+        _pdf_text(payment_ref, 336, 630, 14, "F1", (0.1, 0.12, 0.12)),
+        _pdf_rect(48, 532, 248, 48, (0.93, 0.97, 1.0)),
+        _pdf_text("Invoice date", 68, 560, 10, "F2", (0.28, 0.39, 0.48)),
+        _pdf_text(issued_at, 68, 542, 12, "F1", (0.12, 0.18, 0.22)),
+        _pdf_rect(316, 532, 248, 48, (0.98, 0.94, 0.84)),
+        _pdf_text("Total", 336, 560, 10, "F2", (0.46, 0.36, 0.15)),
+        _pdf_text(_format_money(total), 336, 540, 18, "F2", (0.12, 0.1, 0.06)),
+        _pdf_text("Items", 48, 486, 18, "F2", (0.05, 0.14, 0.18)),
+        _pdf_rect(48, 454, 516, 28, (0.05, 0.14, 0.18)),
+        _pdf_text("Product ID", 66, 464, 11, "F2", (1, 1, 1)),
+        _pdf_text("Quantity", 442, 464, 11, "F2", (1, 1, 1)),
+    ]
+
+    row_y = 426
+    for index, item in enumerate(items[:8]):
+        fill = (0.98, 0.98, 0.96) if index % 2 == 0 else (0.93, 0.97, 0.96)
+        commands.extend(
+            [
+                _pdf_rect(48, row_y - 8, 516, 30, fill),
+                _pdf_text(item.get("product_id", "?"), 66, row_y, 12, "F1", (0.12, 0.12, 0.1)),
+                _pdf_text(item.get("qty", "?"), 466, row_y, 12, "F2", (0.08, 0.28, 0.21)),
+            ]
+        )
+        row_y -= 34
+
+    if len(items) > 8:
+        commands.append(
+            _pdf_text(f"+ {len(items) - 8} more item(s)", 66, row_y, 11, "F1", (0.38, 0.42, 0.39))
+        )
+
+    commands.extend(
+        [
+            _pdf_rect(48, 72, 516, 44, (0.96, 0.98, 0.97)),
+            _pdf_text("Thank you for your order.", 68, 94, 13, "F2", (0.05, 0.14, 0.18)),
+            _pdf_text("Order Platform", 68, 78, 10, "F1", (0.38, 0.42, 0.39)),
+        ]
+    )
+
+    content = "\n".join(commands).encode("latin-1", "replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        b"<< /Length " + str(len(content)).encode("ascii") + b" >>\nstream\n" + content + b"\nendstream",
+    ]
+
+    pdf = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+    offsets = []
+
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += f"{index} 0 obj\n".encode("ascii") + obj + b"\nendobj\n"
+
+    xref_offset = len(pdf)
+    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii")
+
+    for offset in offsets:
+        pdf += f"{offset:010d} 00000 n \n".encode("ascii")
+
+    pdf += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n"
+    ).encode("ascii")
+    return pdf
+
+
 def build_invoice_html(order_id, customer_email, items, total, payment_ref):
     rows = "".join(
         f"<tr><td style='padding:6px;border:1px solid #ddd'>{i.get('product_id','?')}</td>"
@@ -103,7 +217,7 @@ def build_payment_ref(order_id):
 
 
 def build_invoice_key(order_id, payment_ref):
-    return f"invoices/{order_id}/{payment_ref}.txt"
+    return f"invoices/{order_id}/{payment_ref}.pdf"
 
 
 def send_customer_email(order_id, customer_email, items, total, payment_ref, invoice_text):
@@ -247,12 +361,19 @@ def handler(event, context):
                 total=total,
                 payment_ref=payment_ref,
             )
+            invoice_pdf = build_invoice_pdf(
+                order_id=order_id,
+                customer_email=customer_email,
+                items=items,
+                total=total,
+                payment_ref=payment_ref,
+            )
 
             s3_client.put_object(
                 Bucket=os.environ["INVOICE_BUCKET"],
                 Key=invoice_key,
-                Body=invoice_text.encode("utf-8"),
-                ContentType="text/plain",
+                Body=invoice_pdf,
+                ContentType="application/pdf",
             )
             logger.info("Invoice stored in S3 for order %s", order_id)
 

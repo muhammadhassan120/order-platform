@@ -334,6 +334,7 @@ const lastOrderId = document.getElementById('lastOrderId');
 const pipelineState = document.getElementById('pipelineState');
 const invoiceActions = document.getElementById('invoiceActions');
 const invoiceDownloadLink = document.getElementById('invoiceDownloadLink');
+const invoiceDownloadTitle = document.getElementById('invoiceDownloadTitle');
 const invoiceDownloadMeta = document.getElementById('invoiceDownloadMeta');
 const pipelineOverlay = document.getElementById('orderPipelineOverlay');
 const closePipelineBtn = document.getElementById('closePipelineBtn');
@@ -360,12 +361,17 @@ function resetInvoiceDownload(message = 'Available after completion.') {
   invoiceDownloadOrderId = null;
 
   if (invoiceActions) {
-    invoiceActions.classList.add('is-hidden');
+    invoiceActions.classList.remove('is-hidden', 'is-ready');
+    invoiceActions.classList.add('is-pending');
   }
 
   if (invoiceDownloadLink) {
     invoiceDownloadLink.href = '#';
     invoiceDownloadLink.setAttribute('aria-disabled', 'true');
+  }
+
+  if (invoiceDownloadTitle) {
+    invoiceDownloadTitle.textContent = 'Waiting for completion';
   }
 
   if (invoiceDownloadMeta) {
@@ -375,12 +381,17 @@ function resetInvoiceDownload(message = 'Available after completion.') {
 
 function setInvoiceDownloadPending(message) {
   if (invoiceActions) {
-    invoiceActions.classList.remove('is-hidden');
+    invoiceActions.classList.remove('is-hidden', 'is-ready');
+    invoiceActions.classList.add('is-pending');
   }
 
   if (invoiceDownloadLink) {
     invoiceDownloadLink.href = '#';
     invoiceDownloadLink.setAttribute('aria-disabled', 'true');
+  }
+
+  if (invoiceDownloadTitle) {
+    invoiceDownloadTitle.textContent = 'Preparing invoice PDF';
   }
 
   if (invoiceDownloadMeta) {
@@ -392,7 +403,8 @@ function showInvoiceDownload(orderId, invoiceData) {
   invoiceDownloadOrderId = String(orderId);
 
   if (invoiceActions) {
-    invoiceActions.classList.remove('is-hidden');
+    invoiceActions.classList.remove('is-hidden', 'is-pending');
+    invoiceActions.classList.add('is-ready');
   }
 
   if (invoiceDownloadLink) {
@@ -400,9 +412,13 @@ function showInvoiceDownload(orderId, invoiceData) {
     invoiceDownloadLink.removeAttribute('aria-disabled');
   }
 
+  if (invoiceDownloadTitle) {
+    invoiceDownloadTitle.textContent = `Order #${orderId} invoice is ready`;
+  }
+
   if (invoiceDownloadMeta) {
     const minutes = Math.max(1, Math.round((invoiceData.expires_in || 300) / 60));
-    invoiceDownloadMeta.textContent = `Pre-signed S3 link expires in ${minutes} minutes.`;
+    invoiceDownloadMeta.textContent = `PDF download link expires in ${minutes} minutes.`;
   }
 }
 
@@ -410,7 +426,7 @@ async function loadInvoiceDownload(orderId) {
   if (!orderId) return;
   if (invoiceDownloadOrderId === String(orderId)) return;
 
-  setInvoiceDownloadPending('Preparing secure S3 invoice link...');
+  setInvoiceDownloadPending('Preparing secure PDF invoice link...');
 
   try {
     const response = await fetch(`/orders/${encodeURIComponent(orderId)}/invoice`);
